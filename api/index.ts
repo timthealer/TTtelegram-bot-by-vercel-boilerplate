@@ -74,4 +74,3 @@ async function createGitHubFile(folder: string, fileName: string, content: strin
 export default async function handle(req: VercelRequest, res: VercelResponse) {
   await bot.webhookCallback('/api/webhook')(req, res);
 }
-}
