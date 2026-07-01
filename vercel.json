@@ -1,11 +1,13 @@
 {
-  "version": 2,
-  "public": true,
+  "functions": {
+    "api/index.ts": {
+      "runtime": "nodejs18.x"
+    }
+  },
   "rewrites": [
     {
       "source": "/(.*)",
-      "destination": "api/index.ts"
+      "destination": "/api/index"
     }
-  ],
-  "redirects": [{ "source": "/", "destination": "/api", "permanent": false }]
+  ]
 }
