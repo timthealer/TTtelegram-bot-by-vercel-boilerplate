@@ -72,5 +72,6 @@ async function createGitHubFile(folder: string, fileName: string, content: strin
 
 // Экспорт для Vercel (webhook)
 export default async function handle(req: VercelRequest, res: VercelResponse) {
-  await bot.webhookCallback('/webhook')(req, res);
+  await bot.webhookCallback('/api/webhook')(req, res);
+}
 }
