@@ -101,10 +101,5 @@ bot.on('text', async (ctx) => {
 });
 
 export async function startVercel(req: VercelRequest, res: VercelResponse) {
-  await bot.webhookCallback('/webhook')(req, res);
-}
-
-if (process.env.NODE_ENV !== 'production') {
-  bot.launch();
-  console.log('Bot is running locally...');
+  await bot.webhookCallback('/api/webhook')(req, res);
 }
