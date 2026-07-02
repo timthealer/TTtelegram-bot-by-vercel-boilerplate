@@ -8,11 +8,10 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY!;
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN!;
 const GITHUB_OWNER = 'timthealer';
 const GITHUB_REPO = 'TOS';
-const BRANCH = 'master'; // если у тебя main — замени
+const BRANCH = 'master';
 
 const bot = new Telegraf(BOT_TOKEN);
 
-// Вспомогательные функции
 async function getGitHubFile(path: string): Promise<string | null> {
   try {
     const url = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${path}`;
@@ -50,73 +49,61 @@ async function putGitHubFile(path: string, content: string, commitMsg: string) {
   });
 }
 
-// Обработчик сообщений
 bot.on('text', async (ctx) => {
-  const text = ctx.message.text;
+  const rawText = ctx.message.text;
   try {
-    // 1. Читаем Document_Index.md
+    // Читаем индекс (пока не используется, но оставим для будущих шагов)
     const indexContent = await getGitHubFile('Document_Index.md') || 'Индекс пока пуст.';
 
-    // 2. Запрос к Gemini
+    // Экранируем текст для безопасной вставки в промпт
+    const safeText = JSON.stringify(rawText);
+
     const prompt = `
-Ты — Архивариус TOS.
-Индекс заметок:
-${indexContent}
+Ты — Архивариус TOS. Твоя задача — проанализировать сообщение пользователя и вернуть строгий JSON без пояснений.
 
-Сообщение пользователя: "${text}"
-
-Определи, к какой папке относится сообщение (00_CEO, 01_Фермы, 10_Agents, 12_Inbox) и придумай краткий заголовок.
-Ответь ТОЛЬКО JSON:
+Формат ответа:
 {
-  "folder": "одна_из_папок",
-  "title": "заголовок"
+  "title": "краткий заголовок до 5 слов",
+  "folder": "одна из папок: 00_CEO, 01_Фермы, 02_Вода, 03_Микронизация, 04_Финансы, 05_Лодка, 06_Люди, 07_Идеи, 08_Задачи, 09_Дневник, 10_Agents, 11_Canvases, 12_Inbox, 13_Архив",
+  "type": "тип: идея, задача, решение, проект, человек, факт, инструкция",
+  "tags": ["тег1", "тег2", "тег3"],
+  "summary": "краткое описание (одно предложение)",
+  "note": "полный текст сообщения пользователя"
 }
+
+Правила:
+- Всегда возвращай только JSON, без markdown, без пояснений.
+- Если не уверен в папке или типе — выбери наиболее вероятное.
+- Заполняй все поля.
+
+Сообщение пользователя: ${safeText}
 `;
+
     const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
     const geminiRes = await axios.post(geminiUrl, {
       contents: [{ parts: [{ text: prompt }] }],
     });
+
     const raw = geminiRes.data.candidates[0].content.parts[0].text;
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error('Не удалось извлечь JSON');
     const decision = JSON.parse(jsonMatch[0]);
 
-    const folder = decision.folder || '12_Inbox';
-    const title = decision.title || text.slice(0, 50);
-
-    // 3. Создаём заметку
-    const now = new Date();
-    const fileName = now.toISOString().slice(0, 19).replace(/:/g, '-') + '.md';
-    const filePath = `${folder}/${fileName}`;
-    const noteContent = `---
-type: задача
-title: ${title}
-status: активна
-tags: [${folder}]
-created: ${now.toISOString().slice(0, 10)}
-source: telegram
----
-${text}`;
-    await putGitHubFile(filePath, noteContent, `Добавлено из Telegram: ${title}`);
-
-    // 4. Обновляем индекс
-    const newIndex = `${indexContent}\n- title: "${title}"\n  folder: "${folder}"\n  file: "${filePath}"\n`;
-    await putGitHubFile('Document_Index.md', newIndex, `Обновлён индекс: ${title}`);
-
-    // 5. Ответ
-    await ctx.reply(`✅ Заметка создана: ${filePath}`);
+    // ВРЕМЕННО: выводим JSON для проверки
+    await ctx.reply(`📋 Получен JSON:\n\`\`\`json\n${JSON.stringify(decision, null, 2)}\n\`\`\``);
   } catch (error) {
     console.error(error);
+    if (axios.isAxiosError(error) && error.response) {
+      console.error('Ответ Gemini:', error.response.data);
+    }
     await ctx.reply('❌ Ошибка при обработке.');
   }
 });
 
-// Экспорт для Vercel
 export async function startVercel(req: VercelRequest, res: VercelResponse) {
   await bot.webhookCallback('/webhook')(req, res);
 }
 
-// Локальный запуск
 if (process.env.NODE_ENV !== 'production') {
   bot.launch();
   console.log('Bot is running locally...');
