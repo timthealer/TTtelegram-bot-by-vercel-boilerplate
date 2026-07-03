@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { Telegraf } from 'telegraf';
 import axios from 'axios';
 import { VercelRequest, VercelResponse } from '@vercel/node';
+import { Markup } from 'telegraf';
 
 const BOT_TOKEN = process.env.BOT_TOKEN!;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY!;
@@ -11,6 +12,9 @@ const GITHUB_REPO = 'TOS';
 const BRANCH = 'master';
 
 const bot = new Telegraf(BOT_TOKEN);
+
+// Хранилище временных решений для каждого пользователя (по chatId)
+const pendingDecisions = new Map<number, any>();
 
 async function getGitHubFile(path: string): Promise<string | null> {
   try {
@@ -49,13 +53,14 @@ async function putGitHubFile(path: string, content: string, commitMsg: string) {
   });
 }
 
+// Обработка текстовых сообщений
 bot.on('text', async (ctx) => {
   const rawText = ctx.message.text;
-  try {
-    // Читаем индекс (пока не используется, но оставим для будущих шагов)
-    const indexContent = await getGitHubFile('Document_Index.md') || 'Индекс пока пуст.';
+  const chatId = ctx.chat.id;
 
-    // Экранируем текст для безопасной вставки в промпт
+  try {
+    // Читаем индекс (пока не используем, но оставим)
+    // const indexContent = await getGitHubFile('Document_Index.md') || 'Индекс пока пуст.';
     const safeText = JSON.stringify(rawText);
 
     const prompt = `
@@ -93,8 +98,29 @@ bot.on('text', async (ctx) => {
     if (!jsonMatch) throw new Error('Не удалось извлечь JSON');
     const decision = JSON.parse(jsonMatch[0]);
 
-    // ВРЕМЕННО: выводим JSON для проверки
-    await ctx.reply(`📋 Получен JSON:\n\`\`\`json\n${JSON.stringify(decision, null, 2)}\n\`\`\``);
+    // Сохраняем решение для этого пользователя
+    pendingDecisions.set(chatId, decision);
+
+    // Формируем сообщение для подтверждения
+    const confirmText = `
+📝 Я понял так:
+
+Название: ${decision.title}
+Папка: ${decision.folder}
+Тип: ${decision.type}
+Проект: ${decision.project || '—'}
+Теги: ${decision.tags.join(', ')}
+Кратко: ${decision.summary}
+Уверенность: ${Math.round(decision.confidence * 100)}%
+
+Сохранить?
+`;
+
+    // Отправляем сообщение с кнопками
+    await ctx.reply(confirmText, Markup.inlineKeyboard([
+      [Markup.button.callback('✅ Да', 'confirm_yes')],
+      [Markup.button.callback('❌ Нет', 'confirm_no')]
+    ]));
   } catch (error) {
     console.error(error);
     if (axios.isAxiosError(error) && error.response) {
@@ -102,6 +128,60 @@ bot.on('text', async (ctx) => {
     }
     await ctx.reply('❌ Ошибка при обработке.');
   }
+});
+
+// Обработчик кнопки "Да"
+bot.action('confirm_yes', async (ctx) => {
+  const chatId = ctx.chat.id;
+  const decision = pendingDecisions.get(chatId);
+  if (!decision) {
+    await ctx.reply('❌ Не найдено решение для подтверждения.');
+    return;
+  }
+
+  try {
+    // Генерируем имя файла из заголовка (или с датой, если заголовок пуст)
+    const title = decision.title || 'заметка';
+    const fileName = title.replace(/[^a-zA-Zа-яА-Я0-9\s-]/g, '').trim().replace(/\s+/g, '_') + '.md';
+    const filePath = `${decision.folder}/${fileName}`;
+
+    // Проверяем, существует ли уже такой файл (можно позже добавить проверку)
+    // Пока просто создаём
+
+    const now = new Date();
+    const frontmatter = `---
+title: ${decision.title}
+type: ${decision.type}
+status: активна
+project: ${decision.project || ''}
+tags: [${decision.tags.join(', ')}]
+created: ${now.toISOString().slice(0, 10)}
+source: telegram
+---
+${decision.note}`;
+
+    await putGitHubFile(filePath, frontmatter, `Добавлено из Telegram: ${decision.title}`);
+
+    // Обновление Document_Index — будет на Этапе 4
+    // Пока просто подтверждаем сохранение
+
+    // Удаляем из хранилища
+    pendingDecisions.delete(chatId);
+
+    await ctx.reply(`✅ Заметка сохранена: ${filePath}`);
+    await ctx.answerCbQuery(); // закрываем уведомление
+  } catch (error) {
+    console.error(error);
+    await ctx.reply('❌ Ошибка при сохранении.');
+  }
+});
+
+// Обработчик кнопки "Нет"
+bot.action('confirm_no', async (ctx) => {
+  const chatId = ctx.chat.id;
+  pendingDecisions.delete(chatId);
+  await ctx.reply('❌ Сохранение отменено.');
+  await ctx.answerCbQuery();
 });
 
 export async function startVercel(req: VercelRequest, res: VercelResponse) {
