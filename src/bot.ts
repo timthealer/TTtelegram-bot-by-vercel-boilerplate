@@ -21,6 +21,7 @@ bot.on('text', async (ctx) => {
   const response = await handleMessage(ctx.message.text, chatId, state);
 
   if (response.type === 'ask') {
+    // Сохраняем состояние ожидания ответа
     conversations.set(chatId, { ...state, step: 'waiting_ceo_decision', data: response });
     await ctx.reply(response.message);
   } else if (response.type === 'confirm') {
@@ -41,6 +42,9 @@ ${response.notePath ? `✅ Заметка сохранена: ${response.notePat
       [Markup.button.callback('✅ Да', 'confirm_yes')],
       [Markup.button.callback('❌ Нет', 'confirm_no')]
     ]));
+  } else if (response.type === 'response') {
+    // Простой ответ (например, подтверждение получения ответа)
+    await ctx.reply(response.message);
   } else {
     await ctx.reply('❌ Неизвестный ответ');
   }
