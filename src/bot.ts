@@ -1,3 +1,4 @@
+// src/bot.ts
 import { Telegraf } from 'telegraf';
 import { Markup } from 'telegraf';
 import { handleMessage } from './archivist';
@@ -5,7 +6,6 @@ import { ConversationState } from './types';
 
 const bot = new Telegraf(process.env.BOT_TOKEN!);
 
-// Обработчик ошибок Telegraf
 bot.catch((err, ctx) => {
   console.error('===== TELEGRAF ERROR =====');
   console.error(err);
@@ -14,18 +14,19 @@ bot.catch((err, ctx) => {
 
 const conversations = new Map<number, ConversationState>();
 
-bot.on('text', async (ctx) => {
-  const chatId = ctx.chat.id;
-  const state = conversations.get(chatId) || { chatId, step: 'idle', data: null };
-
-  const response = await handleMessage(ctx.message.text, chatId, state);
-
-  if (response.type === 'ask') {
-    // Сохраняем состояние ожидания ответа
-    conversations.set(chatId, { ...state, step: 'waiting_ceo_decision', data: response });
-    await ctx.reply(response.message);
-  } else if (response.type === 'confirm') {
-    const confirmText = `
+function renderResponse(response: any, chatId: number) {
+  const type = response.type || 'error';
+  switch (type) {
+    case 'ask':
+      return {
+        text: response.message,
+        extra: {
+          parse_mode: 'HTML'
+        },
+        nextState: response.nextState || { step: 'waiting_ceo_answer', data: {} }
+      };
+    case 'confirm':
+      const confirmText = `
 📝 <b>CEO принял решение:</b>
 
 ${response.message}
@@ -38,15 +39,55 @@ ${response.notePath ? `✅ Заметка сохранена: ${response.notePat
 
 Сохранить?
 `;
-    await ctx.replyWithHTML(confirmText, Markup.inlineKeyboard([
-      [Markup.button.callback('✅ Да', 'confirm_yes')],
-      [Markup.button.callback('❌ Нет', 'confirm_no')]
-    ]));
-  } else if (response.type === 'response') {
-    // Простой ответ (например, подтверждение получения ответа)
-    await ctx.reply(response.message);
+      return {
+        text: confirmText,
+        extra: {
+          parse_mode: 'HTML',
+          reply_markup: Markup.inlineKeyboard([
+            [Markup.button.callback('✅ Да', 'confirm_yes')],
+            [Markup.button.callback('❌ Нет', 'confirm_no')]
+          ])
+        },
+        nextState: response.nextState || { step: 'idle', data: {} }
+      };
+    case 'response':
+      return {
+        text: response.message,
+        extra: { parse_mode: 'HTML' },
+        nextState: response.nextState || { step: 'idle', data: {} }
+      };
+    case 'error':
+      return {
+        text: response.message,
+        extra: { parse_mode: 'HTML' },
+        nextState: response.nextState || { step: 'idle', data: {} }
+      };
+    default:
+      return {
+        text: '❌ Неизвестный ответ',
+        extra: {},
+        nextState: { step: 'idle', data: {} }
+      };
+  }
+}
+
+bot.on('text', async (ctx) => {
+  const chatId = ctx.chat.id;
+  const state = conversations.get(chatId) || { chatId, step: 'idle', data: {} };
+
+  const response = await handleMessage(ctx.message.text, chatId, state);
+  const rendered = renderResponse(response, chatId);
+
+  // Обновляем состояние
+  if (rendered.nextState) {
+    conversations.set(chatId, { chatId, ...rendered.nextState });
   } else {
-    await ctx.reply('❌ Неизвестный ответ');
+    conversations.set(chatId, { chatId, step: 'idle', data: {} });
+  }
+
+  // Отправляем ответ
+  if (rendered.text) {
+    await ctx.reply(rendered.text, rendered.extra || {});
   }
 });
 
