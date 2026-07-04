@@ -1,4 +1,4 @@
-// src/indexes.ts
+// src/index.ts
 import { getGitHubFile, putGitHubFile } from './github';
 import * as yaml from 'js-yaml';
 
