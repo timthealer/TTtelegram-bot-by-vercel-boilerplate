@@ -1,62 +1,125 @@
+// src/archivist.ts
 import { analyzeMessage } from './gemini';
-import { callCEO } from './ceo';
+import { callCEO, CEOSession } from './ceo';
 import { Decision, ConversationState } from './types';
 import { getProjects, getPeople, getAgents } from './registry';
 import { createNote } from './notes';
+import { normalizeText } from './alias';
 
 export async function handleMessage(
   text: string,
   chatId: number,
-  state: ConversationState | null
-) {
-  // Если ожидаем ответ на вопрос CEO
-  if (state && state.step === 'waiting_ceo_decision') {
-    // Пока просто подтверждаем, что ответ получен
-    // Завтра здесь будет передача ответа CEO
-    return {
-      type: 'response',
-      message: `✅ Понял: "${text}". Обрабатываю... (пока заглушка, завтра доделаем)`
-    };
-  }
+  state: ConversationState
+): Promise<any> {
+  const step = state.step || 'idle';
+  const data = state.data || {};
 
-  // Если есть другое состояние — сбрасываем
-  if (state && state.step !== 'idle') {
-    return {
-      type: 'response',
-      message: '❌ Неизвестное состояние. Начните сначала.'
-    };
-  }
+  switch (step) {
+    case 'idle': {
+      // Нормализуем текст (алиасы)
+      const normalizedText = await normalizeText(text);
+      const decision = await analyzeMessage(normalizedText);
+      const projects = await getProjects();
+      const people = await getPeople();
+      const agents = await getAgents();
 
-  // Основной поток
-  const decision = await analyzeMessage(text);
+      const ceoDecision = await callCEO(decision, { projects, people, agents });
 
-  // Временно убираем проверку needConfirmation, чтобы не было лишних вопросов
-  // if (decision.confidence < 0.8 || decision.needConfirmation) {
-  //   return { type: 'ask', message: `Уточните, пожалуйста...` };
-  // }
+      if (ceoDecision.decision === 'ASK_USER') {
+        // Сохраняем вопрос CEO в состоянии
+        const session: CEOSession = {
+          question: ceoDecision.message,
+          decision
+        };
+        return {
+          type: 'ask',
+          message: ceoDecision.message,
+          nextState: {
+            step: 'waiting_ceo_answer',
+            data: { session }
+          }
+        };
+      }
 
-  const projects = await getProjects();
-  const people = await getPeople();
-  const agents = await getAgents();
+      // Если решение принято — сохраняем
+      let notePath = '';
+      for (const action of ceoDecision.actions || []) {
+        if (action.type === 'create_note') {
+          notePath = await createNote(decision, ceoDecision);
+        }
+      }
 
-  const ceoDecision = await callCEO(decision, { projects, people, agents });
+      return {
+        type: 'confirm',
+        decision,
+        ceoDecision,
+        message: ceoDecision.message,
+        notePath,
+        nextState: { step: 'idle', data: {} }
+      };
+    }
 
-  if (ceoDecision.decision === 'ASK_USER') {
-    return { type: 'ask', message: ceoDecision.message };
-  }
+    case 'waiting_ceo_answer': {
+      const session = data.session as CEOSession;
+      if (!session) {
+        return {
+          type: 'error',
+          message: '❌ Ошибка: потерян контекст вопроса. Начните сначала.',
+          nextState: { step: 'idle', data: {} }
+        };
+      }
 
-  let notePath = '';
-  for (const action of ceoDecision.actions || []) {
-    if (action.type === 'create_note') {
-      notePath = await createNote(decision, ceoDecision);
+      // Передаём ответ пользователя CEO
+      const projects = await getProjects();
+      const people = await getPeople();
+      const agents = await getAgents();
+
+      const ceoDecision = await callCEO(
+        session.decision,
+        { projects, people, agents },
+        text // ответ пользователя
+      );
+
+      if (ceoDecision.decision === 'ASK_USER') {
+        // Если CEO снова спрашивает — обновляем состояние
+        const newSession: CEOSession = {
+          question: ceoDecision.message,
+          decision: session.decision
+        };
+        return {
+          type: 'ask',
+          message: ceoDecision.message,
+          nextState: {
+            step: 'waiting_ceo_answer',
+            data: { session: newSession }
+          }
+        };
+      }
+
+      // Сохраняем
+      let notePath = '';
+      for (const action of ceoDecision.actions || []) {
+        if (action.type === 'create_note') {
+          notePath = await createNote(session.decision, ceoDecision);
+        }
+      }
+
+      return {
+        type: 'confirm',
+        decision: session.decision,
+        ceoDecision,
+        message: ceoDecision.message,
+        notePath,
+        nextState: { step: 'idle', data: {} }
+      };
+    }
+
+    default: {
+      return {
+        type: 'error',
+        message: '❌ Неизвестное состояние. Начните сначала.',
+        nextState: { step: 'idle', data: {} }
+      };
     }
   }
-
-  return {
-    type: 'confirm',
-    decision,
-    ceoDecision,
-    message: ceoDecision.message,
-    notePath
-  };
 }
