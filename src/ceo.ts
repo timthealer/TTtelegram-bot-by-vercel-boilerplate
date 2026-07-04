@@ -1,12 +1,22 @@
+// src/ceo.ts
 import { Decision, CEODecision } from './types';
 import { getGitHubFile } from './github';
 import axios from 'axios';
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY!;
 
-export async function callCEO(decision: Decision, registryData: any): Promise<CEODecision> {
+export interface CEOSession {
+  question: string;
+  decision: Decision;
+}
+
+export async function callCEO(
+  decision: Decision,
+  registryData: any,
+  userAnswer?: string
+): Promise<CEODecision> {
   const systemPrompt = await getCEOSystemPrompt();
-  const userPrompt = `
+  let userPrompt = `
 Registry:
 Проекты: ${JSON.stringify(registryData.projects, null, 2)}
 Люди: ${JSON.stringify(registryData.people, null, 2)}
@@ -14,9 +24,16 @@ Registry:
 
 Сообщение пользователя (извлечённые сущности):
 ${JSON.stringify(decision, null, 2)}
-
-Прими решение и верни JSON в формате, описанном в System Prompt.
 `;
+
+  if (userAnswer) {
+    userPrompt += `
+Ответ пользователя на предыдущий вопрос CEO:
+${userAnswer}
+
+Учти этот ответ при принятии решения.
+`;
+  }
 
   const combinedPrompt = `${systemPrompt}\n\n${userPrompt}`;
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
