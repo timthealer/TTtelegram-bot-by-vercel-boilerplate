@@ -8,17 +8,22 @@ export async function createNote(decision: Decision, ceoDecision: any): Promise<
   const filePath = `${folder}/${fileName}`;
 
   const now = new Date();
+
+  // Безопасно извлекаем entities, tags
+  const entities = decision.entities?.map(e => `  - ${e.id}`).join('\n') ?? '';
+  const tags = (decision.tags || []).join(', ');
+
   const frontmatter = `---
 title: ${title}
-type: ${decision.type}
+type: ${decision.type || 'заметка'}
 status: активна
 entities:
-${decision.entities.map(e => `  - ${e.id}`).join('\n')}
-tags: [${(decision.tags || []).join(', ')}]
+${entities}
+tags: [${tags}]
 created: ${now.toISOString().slice(0, 10)}
 source: telegram
 ---
-${decision.note}`;
+${decision.note || ''}`;
 
   await putGitHubFile(filePath, frontmatter, `Добавлено из Telegram: ${title}`);
   return filePath;
