@@ -1,5 +1,7 @@
+// src/notes.ts
 import { Decision } from './types';
 import { putGitHubFile } from './github';
+import { updateDocumentIndex } from './indexes';
 
 export async function createNote(decision: Decision, ceoDecision: any): Promise<string> {
   const title = decision.title || 'заметка';
@@ -8,8 +10,6 @@ export async function createNote(decision: Decision, ceoDecision: any): Promise<
   const filePath = `${folder}/${fileName}`;
 
   const now = new Date();
-
-  // Безопасно извлекаем entities, tags
   const entities = decision.entities?.map(e => `  - ${e.id}`).join('\n') ?? '';
   const tags = (decision.tags || []).join(', ');
 
@@ -26,5 +26,9 @@ source: telegram
 ${decision.note || ''}`;
 
   await putGitHubFile(filePath, frontmatter, `Добавлено из Telegram: ${title}`);
+
+  // Обновляем Document_Index
+  await updateDocumentIndex(filePath, decision);
+
   return filePath;
 }
