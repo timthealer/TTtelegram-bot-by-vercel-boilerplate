@@ -33,9 +33,18 @@ export async function analyzeMessage(text: string): Promise<Decision> {
 `;
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
-  const res = await axios.post(url, {
+  let res;
+
+try {
+  res = await axios.post(url, {
     contents: [{ parts: [{ text: prompt }] }],
   });
+} catch (err: any) {
+  console.error(
+    JSON.stringify(err.response?.data, null, 2)
+  );
+  throw err;
+}
 
   const raw = res.data.candidates[0].content.parts[0].text;
   const jsonMatch = raw.match(/\{[\s\S]*\}/);
