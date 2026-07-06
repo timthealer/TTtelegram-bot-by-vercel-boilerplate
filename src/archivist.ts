@@ -75,97 +75,117 @@ export async function handleMessage(
 
       let updatedDecision = savedDecision;
       let updatedCEODecision = savedCEODecision;
+      let noteFolder = '12_Inbox';
 
       console.log('[handleMessage] WAITING_CEO_ANSWER: text=', text);
 
-      // Обрабатываем ответ пользователя (выбор из кнопок)
-      if (text.startsWith('person_existing_')) {
-        const personId = text.replace('person_existing_', '');
-        console.log('[handleMessage] WAITING_CEO_ANSWER: person_existing_', personId);
-        const people = await getPeople();
-        const selectedPerson = people.find(p => p.id === personId);
-        if (selectedPerson) {
+      // --- Обработка ответов ---
+      try {
+        if (text.startsWith('person_existing_')) {
+          const personId = text.replace('person_existing_', '');
+          console.log('[handleMessage] WAITING_CEO_ANSWER: person_existing_', personId);
+          const people = await getPeople();
+          const selectedPerson = people.find(p => p.id === personId);
+          if (selectedPerson) {
+            updatedCEODecision.actions = updatedCEODecision.actions || [];
+            updatedCEODecision.actions.push({ type: 'link_person', person_id: selectedPerson.id });
+            updatedCEODecision.message = `✅ Использую существующего человека: ${selectedPerson.name}`;
+            noteFolder = updatedCEODecision.actions.find(a => a.type === 'set_project')?.project || '12_Inbox';
+            updatedCEODecision.actions.push({ type: 'create_note', folder: noteFolder });
+          } else {
+            console.log('[handleMessage] WAITING_CEO_ANSWER: person not found');
+          }
+        } else if (text === 'person_create') {
+          console.log('[handleMessage] WAITING_CEO_ANSWER: person_create');
+          const newPerson = {
+            id: `person-${Date.now()}`,
+            name: 'Новый человек',
+            aliases: [],
+            projects: []
+          };
+          await addPerson(newPerson);
+          console.log('[handleMessage] WAITING_CEO_ANSWER: person created');
           updatedCEODecision.actions = updatedCEODecision.actions || [];
-          updatedCEODecision.actions.push({ type: 'link_person', person_id: selectedPerson.id });
-          updatedCEODecision.message = `✅ Использую существующего человека: ${selectedPerson.name}`;
-          // Добавляем действие для создания заметки
-          updatedCEODecision.actions.push({ type: 'create_note', folder: updatedCEODecision.actions.find(a => a.type === 'set_project')?.project || '12_Inbox' });
-        } else {
-          console.log('[handleMessage] WAITING_CEO_ANSWER: person not found');
-        }
-      } else if (text === 'person_create') {
-        console.log('[handleMessage] WAITING_CEO_ANSWER: person_create');
-        // Создаём нового человека
-        const newPerson = {
-          id: `person-${Date.now()}`,
-          name: 'Новый человек',
-          aliases: [],
-          projects: []
-        };
-        await addPerson(newPerson);
-        updatedCEODecision.actions = updatedCEODecision.actions || [];
-        updatedCEODecision.actions.push({ type: 'link_person', person_id: newPerson.id });
-        updatedCEODecision.message = `✅ Создан новый человек: ${newPerson.name}`;
-        updatedCEODecision.actions.push({ type: 'create_note', folder: updatedCEODecision.actions.find(a => a.type === 'set_project')?.project || '12_Inbox' });
-      } else if (text.startsWith('project_existing_')) {
-        const projectId = text.replace('project_existing_', '');
-        console.log('[handleMessage] WAITING_CEO_ANSWER: project_existing_', projectId);
-        const projects = await getProjects();
-        const selectedProject = projects.find(p => p.id === projectId);
-        if (selectedProject) {
+          updatedCEODecision.actions.push({ type: 'link_person', person_id: newPerson.id });
+          updatedCEODecision.message = `✅ Создан новый человек: ${newPerson.name}`;
+          noteFolder = updatedCEODecision.actions.find(a => a.type === 'set_project')?.project || '12_Inbox';
+          updatedCEODecision.actions.push({ type: 'create_note', folder: noteFolder });
+        } else if (text.startsWith('project_existing_')) {
+          const projectId = text.replace('project_existing_', '');
+          console.log('[handleMessage] WAITING_CEO_ANSWER: project_existing_', projectId);
+          const projects = await getProjects();
+          const selectedProject = projects.find(p => p.id === projectId);
+          if (selectedProject) {
+            updatedCEODecision.actions = updatedCEODecision.actions || [];
+            updatedCEODecision.actions.push({ type: 'set_project', project: selectedProject.folder || '12_Inbox' });
+            updatedCEODecision.message = `✅ Использую существующий проект: ${selectedProject.name}`;
+            noteFolder = selectedProject.folder || '12_Inbox';
+            updatedCEODecision.actions.push({ type: 'create_note', folder: noteFolder });
+          } else {
+            console.log('[handleMessage] WAITING_CEO_ANSWER: project not found');
+          }
+        } else if (text === 'project_create') {
+          console.log('[handleMessage] WAITING_CEO_ANSWER: project_create');
+          const newProject = {
+            id: `project-${Date.now()}`,
+            name: 'Новый проект',
+            status: 'активен',
+            folder: '12_Inbox',
+            created: new Date().toISOString().slice(0, 10),
+            tags: []
+          };
+          await addProject(newProject);
+          console.log('[handleMessage] WAITING_CEO_ANSWER: project created');
           updatedCEODecision.actions = updatedCEODecision.actions || [];
-          updatedCEODecision.actions.push({ type: 'set_project', project: selectedProject.folder || '12_Inbox' });
-          updatedCEODecision.message = `✅ Использую существующий проект: ${selectedProject.name}`;
-          updatedCEODecision.actions.push({ type: 'create_note', folder: selectedProject.folder || '12_Inbox' });
+          updatedCEODecision.actions.push({ type: 'set_project', project: '12_Inbox' });
+          updatedCEODecision.message = `✅ Создан новый проект: ${newProject.name}`;
+          noteFolder = '12_Inbox';
+          updatedCEODecision.actions.push({ type: 'create_note', folder: noteFolder });
+        } else if (text === 'cancel') {
+          console.log('[handleMessage] WAITING_CEO_ANSWER: cancel');
+          return {
+            type: 'response',
+            message: '❌ Отменено.',
+            nextState: { step: 'idle', data: {} }
+          };
         } else {
-          console.log('[handleMessage] WAITING_CEO_ANSWER: project not found');
+          console.log('[handleMessage] WAITING_CEO_ANSWER: unknown answer, asking again');
+          return {
+            type: 'ask',
+            message: '❌ Не понял ответ. Пожалуйста, выберите из предложенных вариантов.',
+            buttons: savedCEODecision.buttons || [],
+            nextState: { step: 'waiting_ceo_answer', data: { decision: savedDecision, ceoDecision: savedCEODecision } }
+          };
         }
-      } else if (text === 'project_create') {
-        console.log('[handleMessage] WAITING_CEO_ANSWER: project_create');
-        const newProject = {
-          id: `project-${Date.now()}`,
-          name: 'Новый проект',
-          status: 'активен',
-          folder: '12_Inbox',
-          created: new Date().toISOString().slice(0, 10),
-          tags: []
-        };
-        await addProject(newProject);
-        updatedCEODecision.actions = updatedCEODecision.actions || [];
-        updatedCEODecision.actions.push({ type: 'set_project', project: '12_Inbox' });
-        updatedCEODecision.message = `✅ Создан новый проект: ${newProject.name}`;
-        updatedCEODecision.actions.push({ type: 'create_note', folder: '12_Inbox' });
-      } else if (text === 'cancel') {
-        console.log('[handleMessage] WAITING_CEO_ANSWER: cancel');
+      } catch (error) {
+        console.error('[handleMessage] WAITING_CEO_ANSWER: error processing answer', error);
         return {
-          type: 'response',
-          message: '❌ Отменено.',
+          type: 'error',
+          message: `❌ Ошибка: ${error.message || error}`,
           nextState: { step: 'idle', data: {} }
-        };
-      } else {
-        console.log('[handleMessage] WAITING_CEO_ANSWER: unknown answer, asking again');
-        // Неизвестный ответ — переспрашиваем
-        return {
-          type: 'ask',
-          message: '❌ Не понял ответ. Пожалуйста, выберите из предложенных вариантов.',
-          buttons: savedCEODecision.buttons || [],
-          nextState: { step: 'waiting_ceo_answer', data: { decision: savedDecision, ceoDecision: savedCEODecision } }
         };
       }
 
       console.log('[handleMessage] WAITING_CEO_ANSWER: creating note...');
-      // Всегда создаём заметку
-      const notePath = await createNote(updatedDecision, updatedCEODecision);
-      console.log('[handleMessage] WAITING_CEO_ANSWER: note created at', notePath);
-
-      return {
-        type: 'confirm',
-        decision: updatedDecision,
-        ceoDecision: updatedCEODecision,
-        message: updatedCEODecision.message,
-        notePath,
-        nextState: { step: 'idle', data: {} }
-      };
+      try {
+        const notePath = await createNote(updatedDecision, updatedCEODecision);
+        console.log('[handleMessage] WAITING_CEO_ANSWER: note created at', notePath);
+        return {
+          type: 'confirm',
+          decision: updatedDecision,
+          ceoDecision: updatedCEODecision,
+          message: updatedCEODecision.message,
+          notePath,
+          nextState: { step: 'idle', data: {} }
+        };
+      } catch (error) {
+        console.error('[handleMessage] WAITING_CEO_ANSWER: error creating note', error);
+        return {
+          type: 'error',
+          message: `❌ Ошибка создания заметки: ${error.message || error}`,
+          nextState: { step: 'idle', data: {} }
+        };
+      }
     }
 
     default: {
