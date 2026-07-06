@@ -1,6 +1,6 @@
 // src/notes.ts
 
-import { Decision } from "./types";
+import { Decision, CEODecision } from "./types";
 import { putGitHubFile } from "./github";
 
 function sanitize(name: string): string {
@@ -10,28 +10,50 @@ function sanitize(name: string): string {
     .trim();
 }
 
-function buildPath(decision: Decision): string {
-  const folder = decision.folder?.trim() || "12_Inbox";
+function resolveFolder(
+  decision: Decision,
+  ceoDecision: CEODecision
+): string {
+
+  // если CEO выбрал проект
+  const projectAction = ceoDecision.actions?.find(
+    (a: any) => a.type === "set_project"
+  );
+
+  if (projectAction?.project) {
+    return projectAction.project;
+  }
+
+  if (decision.folder && decision.folder.trim()) {
+    return decision.folder.trim();
+  }
+
+  return "12_Inbox";
+}
+
+export async function createNote(
+  decision: Decision,
+  ceoDecision: CEODecision
+): Promise<string> {
+
+  const folder = resolveFolder(decision, ceoDecision);
 
   const fileName =
     sanitize(decision.title || "Новая заметка") + ".md";
 
-  return `${folder}/${fileName}`;
-}
+  const path = `${folder}/${fileName}`;
 
-function buildMarkdown(decision: Decision): string {
-  const entities =
-    (decision.entities || [])
-      .map((e) => `- ${e.type}: ${e.name}`)
-      .join("\n") || "-";
+  const entities = (decision.entities || [])
+    .map(e => `- ${e.type}: ${e.name}`)
+    .join("\n");
 
-  return `# ${decision.title}
+  const md = `# ${decision.title}
 
 ## Тип
 
 ${decision.type}
 
-## Описание
+## Кратко
 
 ${decision.summary}
 
@@ -41,21 +63,13 @@ ${decision.note}
 
 ## Сущности
 
-${entities}
+${entities || "-"}
+
 `;
-}
-
-export async function createNote(
-  decision: Decision
-): Promise<string> {
-
-  const path = buildPath(decision);
-
-  const content = buildMarkdown(decision);
 
   await putGitHubFile(
     path,
-    content,
+    md,
     `Create note: ${decision.title}`
   );
 
