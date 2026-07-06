@@ -1,14 +1,10 @@
 // src/ceo.ts
-import { Decision, CEODecision } from './types';
-import { getGitHubFile } from './github';
-import axios from 'axios';
+
+import axios from "axios";
+import { getGitHubFile } from "./github";
+import { Decision, CEODecision } from "./types";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY!;
-
-export interface CEOSession {
-  question: string;
-  decision: Decision;
-}
 
 export async function callCEO(
   decision: Decision,
@@ -16,41 +12,180 @@ export async function callCEO(
   userAnswer?: string
 ): Promise<CEODecision> {
   const systemPrompt = await getCEOSystemPrompt();
-  let userPrompt = `
-Registry:
-Проекты: ${JSON.stringify(registryData.projects, null, 2)}
-Люди: ${JSON.stringify(registryData.people, null, 2)}
-Агенты: ${JSON.stringify(registryData.agents, null, 2)}
 
-Сообщение пользователя (извлечённые сущности):
+  const prompt = `
+${systemPrompt}
+
+=========================
+РЕЕСТР
+
+Проекты:
+${JSON.stringify(registryData.projects, null, 2)}
+
+Люди:
+${JSON.stringify(registryData.people, null, 2)}
+
+Агенты:
+${JSON.stringify(registryData.agents, null, 2)}
+
+=========================
+
+Сообщение:
+
 ${JSON.stringify(decision, null, 2)}
-`;
 
-  if (userAnswer) {
-    userPrompt += `
-Ответ пользователя на предыдущий вопрос CEO:
+${
+  userAnswer
+    ? `
+Ответ пользователя:
+
 ${userAnswer}
+`
+    : ""
+}
 
-Учти этот ответ при принятии решения.
+=========================
+
+Верни ТОЛЬКО JSON.
+
+Формат:
+
+{
+  "decision":"ASK_USER | USE_EXISTING_PROJECT | CREATE_NEW_PROJECT | UPDATE_REGISTRY",
+
+  "message":"что написать пользователю",
+
+  "question":{
+      "type":"confirmAlias|selectProject|confirmCreateProject",
+
+      "title":"короткий вопрос",
+
+      "buttons":[
+          {
+              "id":"yes",
+              "text":"✅ Да"
+          },
+          {
+              "id":"no",
+              "text":"❌ Нет"
+          }
+      ]
+  },
+
+  "actions":[]
+}
+
+Правила:
+
+Если нужно уточнение —
+
+НЕ пиши вопросы списком.
+
+НЕ используй нумерацию.
+
+НЕ пиши длинные объяснения.
+
+Всегда используй question.buttons.
+
+Например:
+
+{
+ "decision":"ASK_USER",
+
+ "message":"Макс — это Максим?",
+
+ "question":{
+   "type":"confirmAlias",
+   "title":"Макс = Максим?",
+   "buttons":[
+      {
+         "id":"yes",
+         "text":"✅ Да"
+      },
+      {
+         "id":"no",
+         "text":"❌ Нет"
+      }
+   ]
+ }
+
+}
+
+Если проект неизвестен —
+
+{
+ "decision":"ASK_USER",
+
+ "message":"К какому проекту относится задача?",
+
+ "question":{
+   "type":"selectProject",
+   "buttons":[
+      {
+        "id":"project:Вода",
+        "text":"💧 Вода"
+      },
+      {
+        "id":"project:Фермы",
+        "text":"🌾 Фермы"
+      },
+      {
+        "id":"project:new",
+        "text":"➕ Новый проект"
+      }
+   ]
+ }
+
+}
+
+НИКОГДА не задавай больше одного вопроса одновременно.
 `;
-  }
 
-  const combinedPrompt = `${systemPrompt}\n\n${userPrompt}`;
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+
   const res = await axios.post(url, {
-    contents: [{ parts: [{ text: combinedPrompt }] }],
+    contents: [
+      {
+        parts: [
+          {
+            text: prompt,
+          },
+        ],
+      },
+    ],
   });
 
   const raw = res.data.candidates[0].content.parts[0].text;
-  const jsonMatch = raw.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error('Не удалось извлечь JSON из ответа CEO');
-  return JSON.parse(jsonMatch[0]);
+
+  const json = raw.match(/\{[\s\S]*\}/);
+
+  if (!json) {
+    throw new Error("CEO вернул не JSON");
+  }
+
+  return JSON.parse(json[0]) as CEODecision;
 }
 
 async function getCEOSystemPrompt(): Promise<string> {
-  const content = await getGitHubFile('10_Agents/000_CEO/System_Prompt.md');
-  if (!content) {
-    return `Ты — CEO TOS. ... (полный текст промпта)`;
-  }
-  return content;
+  try {
+    const prompt = await getGitHubFile(
+      "10_Agents/000_CEO/System_Prompt.md"
+    );
+
+    if (prompt?.trim()) return prompt;
+  } catch {}
+
+  return `
+Ты CEO системы знаний TOS.
+
+Ты принимаешь архитектурные решения.
+
+Если уверен — принимай решение.
+
+Если не уверен — задавай ОДИН вопрос.
+
+Не задавай несколько вопросов сразу.
+
+Возвращай только JSON.
+`;
 }
