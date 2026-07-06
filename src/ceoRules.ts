@@ -1,216 +1,203 @@
 // src/ceoRules.ts
+import { Decision, CEODecision, Entity } from './types';
 
-import { CEODecision, Decision } from "./types";
-
-function normalize(s: string) {
-  return s.toLowerCase().trim();
+function normalize(str: string): string {
+  return str.toLowerCase().trim().replace(/\s+/g, ' ');
 }
 
-function startsLike(a: string, b: string) {
-  a = normalize(a);
-  b = normalize(b);
-
-  return (
-    a === b ||
-    a.startsWith(b) ||
-    b.startsWith(a)
+function findMatchingProject(
+  name: string,
+  projects: any[]
+): { exact: any | null; similar: any[] } {
+  const normalized = normalize(name);
+  const exact = projects.find(p => normalize(p.name) === normalized) || null;
+  const similar = projects.filter(p =>
+    !exact && (
+      normalize(p.name).includes(normalized) ||
+      normalized.includes(normalize(p.name)) ||
+      (p.aliases && p.aliases.some((a: string) => normalize(a) === normalized))
+    )
   );
+  return { exact, similar };
 }
 
-export async function runCEORules(
+function findMatchingPerson(
+  name: string,
+  people: any[]
+): { exact: any | null; similar: any[] } {
+  const normalized = normalize(name);
+  const exact = people.find(p => normalize(p.name) === normalized) || null;
+  const similar = people.filter(p =>
+    !exact && (
+      normalize(p.name).includes(normalized) ||
+      normalized.includes(normalize(p.name)) ||
+      (p.aliases && p.aliases.some((a: string) => normalize(a) === normalized))
+    )
+  );
+  return { exact, similar };
+}
+
+export function runCEORules(
   decision: Decision,
-  projects: any[],
-  people: any[],
-  agents: any[],
-  userAnswer?: string
-): Promise<CEODecision> {
+  registry: { projects: any[]; people: any[]; agents: any[] }
+): CEODecision {
+  const { projects, people } = registry;
 
-  // ==========================================
-  // пользователь ответил на вопрос
-  // ==========================================
+  // Извлекаем сущности проекта и человека из decision.entities
+  const projectEntity = decision.entities.find(e => e.type === 'project');
+  const personEntity = decision.entities.find(e => e.type === 'person');
 
-  if (userAnswer) {
+  // --- Обработка проекта ---
+  let projectResult: { exact: any | null; similar: any[] } | null = null;
+  let projectName = projectEntity?.name || '';
+  if (projectName) {
+    projectResult = findMatchingProject(projectName, projects);
+  }
 
-    if (userAnswer === "yes") {
+  // --- Обработка человека ---
+  let personResult: { exact: any | null; similar: any[] } | null = null;
+  let personName = personEntity?.name || '';
+  if (personName) {
+    personResult = findMatchingPerson(personName, people);
+  }
 
-      return {
-        decision: "UPDATE_REGISTRY",
-        message: "Отлично. Использую существующую запись.",
-        actions: [
-          {
-            type: "merge_entity"
-          },
-          {
-            type: "create_note"
-          }
-        ]
-      };
-    }
-
-    if (userAnswer === "no") {
-
-      return {
-        decision: "CREATE_NEW_ENTITY",
-        message: "Создам новую запись.",
-        actions: [
-          {
-            type: "create_entity"
-          },
-          {
-            type: "create_note"
-          }
-        ]
-      };
-    }
-
-    if (userAnswer.startsWith("project:")) {
-
-      const project = userAnswer.replace("project:", "");
-
-      if (project === "new") {
-
-        return {
-          decision: "ASK_USER",
-
-          message: "Введите название нового проекта.",
-
-          question: {
-            type: "inputProjectName",
-            title: "Название проекта"
-          }
-        };
-      }
-
-      return {
-        decision: "USE_EXISTING_PROJECT",
-
-        message: `Проект выбран: ${project}`,
-
-        actions: [
-          {
-            type: "set_project",
-            project
-          },
-          {
-            type: "create_note"
-          }
-        ]
-      };
-    }
-
+  // --- Случай: есть и проект, и человек, и оба точные совпадения ---
+  if (projectResult?.exact && personResult?.exact) {
     return {
-
-      decision: "CREATE_NEW_PROJECT",
-
-      message: `Создаю проект "${userAnswer}".`,
-
+      decision: 'USE_EXISTING_PROJECT',
+      project_id: projectResult.exact.id,
       actions: [
-        {
-          type: "create_project",
-          name: userAnswer
-        },
-        {
-          type: "create_note"
-        }
-      ]
+        { type: 'set_project', project: projectResult.exact.folder || '12_Inbox' },
+        { type: 'link_person', person_id: personResult.exact.id }
+      ],
+      message: `✅ Использую существующий проект "${projectResult.exact.name}" и человека "${personResult.exact.name}".`
     };
   }
 
-  // ==========================================
-  // проверяем людей
-  // ==========================================
-
-  for (const entity of decision.entities || []) {
-
-    if (entity.type !== "person") continue;
-
-    for (const person of people) {
-
-      if (startsLike(entity.name, person.name)) {
-
+  // --- Случай: есть проект, но неоднозначность или отсутствие ---
+  if (projectEntity) {
+    if (projectResult?.exact) {
+      // Точное совпадение — используем проект
+      const project = projectResult.exact;
+      // Проверяем человека
+      if (personEntity) {
+        if (personResult?.exact) {
+          return {
+            decision: 'USE_EXISTING_PROJECT',
+            project_id: project.id,
+            actions: [
+              { type: 'set_project', project: project.folder || '12_Inbox' },
+              { type: 'link_person', person_id: personResult.exact.id }
+            ],
+            message: `✅ Использую проект "${project.name}" и человека "${personResult.exact.name}".`
+          };
+        } else if (personResult?.similar.length > 0) {
+          // Есть похожие люди — спрашиваем
+          const buttons = personResult.similar.map(p => ({
+            text: `${p.name} (существующий)`,
+            value: `person_existing_${p.id}`
+          }));
+          buttons.push({ text: '➕ Новый человек', value: 'person_new' });
+          buttons.push({ text: '❌ Отмена', value: 'cancel' });
+          return {
+            decision: 'ASK_USER',
+            message: `👤 Найдены похожие люди для "${personName}":\n${personResult.similar.map(p => `- ${p.name}`).join('\n')}\n\nВыберите:`,
+            actions: [],
+            buttons
+          };
+        } else {
+          // Человек не найден — предлагаем создать
+          const buttons = [
+            { text: '➕ Создать нового человека', value: 'person_create' },
+            { text: '❌ Пропустить', value: 'person_skip' }
+          ];
+          return {
+            decision: 'ASK_USER',
+            message: `👤 Человек "${personName}" не найден. Создать нового?`,
+            actions: [{ type: 'set_project', project: project.folder || '12_Inbox' }],
+            buttons
+          };
+        }
+      } else {
+        // Только проект, человека нет
         return {
-
-          decision: "ASK_USER",
-
-          message: `${entity.name} — это ${person.name}?`,
-
-          question: {
-
-            type: "confirmAlias",
-
-            title: `${entity.name} = ${person.name}?`,
-
-            buttons: [
-
-              {
-                id: "yes",
-                text: "✅ Да"
-              },
-
-              {
-                id: "no",
-                text: "❌ Нет"
-              }
-
-            ]
-          }
+          decision: 'USE_EXISTING_PROJECT',
+          project_id: project.id,
+          actions: [{ type: 'set_project', project: project.folder || '12_Inbox' }],
+          message: `✅ Использую проект "${project.name}". Сохранить заметку?`
         };
       }
+    } else if (projectResult?.similar.length > 0) {
+      // Есть похожие проекты — спрашиваем
+      const buttons = projectResult.similar.map(p => ({
+        text: `${p.name} (существующий)`,
+        value: `project_existing_${p.id}`
+      }));
+      buttons.push({ text: '➕ Новый проект', value: 'project_new' });
+      buttons.push({ text: '❌ Отмена', value: 'cancel' });
+      return {
+        decision: 'ASK_USER',
+        message: `📁 Найдены похожие проекты для "${projectName}":\n${projectResult.similar.map(p => `- ${p.name}`).join('\n')}\n\nВыберите:`,
+        actions: [],
+        buttons
+      };
+    } else {
+      // Проект не найден — предлагаем создать
+      const buttons = [
+        { text: '➕ Создать новый проект', value: 'project_create' },
+        { text: '❌ Отмена', value: 'cancel' }
+      ];
+      return {
+        decision: 'ASK_USER',
+        message: `📁 Проект "${projectName}" не найден. Создать новый?`,
+        actions: [],
+        buttons
+      };
     }
   }
 
-  // ==========================================
-  // проверяем проект
-  // ==========================================
-
-  if (!decision.project) {
-
-    return {
-
-      decision: "ASK_USER",
-
-      message: "К какому проекту относится задача?",
-
-      question: {
-
-        type: "selectProject",
-
-        title: "Выберите проект",
-
-        buttons: [
-
-          ...projects.map((p) => ({
-            id: `project:${p.name}`,
-            text: `📁 ${p.name}`
-          })),
-
-          {
-            id: "project:new",
-            text: "➕ Новый проект"
-          }
-
-        ]
-      }
-    };
+  // --- Случай: есть только человек, без проекта ---
+  if (personEntity) {
+    if (personResult?.exact) {
+      return {
+        decision: 'USE_EXISTING_PROJECT', // но проекта нет, используем дефолтную папку
+        actions: [
+          { type: 'set_project', project: '12_Inbox' },
+          { type: 'link_person', person_id: personResult.exact.id }
+        ],
+        message: `✅ Использую существующего человека "${personResult.exact.name}". Сохранить в Inbox?`
+      };
+    } else if (personResult?.similar.length > 0) {
+      const buttons = personResult.similar.map(p => ({
+        text: `${p.name} (существующий)`,
+        value: `person_existing_${p.id}`
+      }));
+      buttons.push({ text: '➕ Новый человек', value: 'person_new' });
+      buttons.push({ text: '❌ Отмена', value: 'cancel' });
+      return {
+        decision: 'ASK_USER',
+        message: `👤 Найдены похожие люди для "${personName}":\n${personResult.similar.map(p => `- ${p.name}`).join('\n')}\n\nВыберите:`,
+        actions: [],
+        buttons
+      };
+    } else {
+      const buttons = [
+        { text: '➕ Создать нового человека', value: 'person_create' },
+        { text: '❌ Пропустить', value: 'person_skip' }
+      ];
+      return {
+        decision: 'ASK_USER',
+        message: `👤 Человек "${personName}" не найден. Создать нового?`,
+        actions: [],
+        buttons
+      };
+    }
   }
 
-  // ==========================================
-  // всё понятно
-  // ==========================================
-
+  // --- Ничего не найдено — просто сохраняем в Inbox ---
   return {
-
-    decision: "USE_EXISTING_PROJECT",
-
-    message: "Всё понятно. Сохраняю.",
-
-    actions: [
-
-      {
-        type: "create_note"
-      }
-
-    ]
+    decision: 'USE_EXISTING_PROJECT', // используем Inbox как проект по умолчанию
+    actions: [{ type: 'set_project', project: '12_Inbox' }],
+    message: '📥 Сохраню в Inbox. Если нужно в другой проект — уточните.'
   };
-
 }
