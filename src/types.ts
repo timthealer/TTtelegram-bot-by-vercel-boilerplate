@@ -1,42 +1,76 @@
-// Типы для TOS Knowledge Engine
+// src/types.ts
 
 export interface Entity {
-  id: string;
+  id?: string;
   type: string;
   name: string;
   aliases?: string[];
   [key: string]: any;
 }
 
-export interface MessageContext {
-  chatId: number;
-  text: string;
-}
-
 export interface Decision {
-  entities: Entity[];          // всегда массив, даже пустой
+  entities: Entity[];
   title: string;
-  folder?: string;             // может быть пустым
-  type: string;                // идея, задача, решение...
+  folder?: string;
+  type: string;
   summary: string;
   confidence: number;
   needConfirmation: boolean;
   note: string;
-  tags?: string[];             // добавлено
-  project?: string;            // добавлено
-  people?: string;             // добавлено
+  tags?: string[];
+  project?: string;
+  people?: string;
 }
 
 export interface ConversationState {
   chatId: number;
-  step: 'waiting_decision' | 'waiting_project' | 'waiting_person' | 'waiting_folder' | 'idle' | 'waiting_ceo_decision';
+  step:
+    | "idle"
+    | "waiting_ceo_answer"
+    | "waiting_project_name"
+    | "waiting_person_name";
+
   data: any;
 }
 
+export interface QuestionButton {
+  id: string;
+  text: string;
+}
+
+export interface CEOQuestion {
+  type:
+    | "confirmAlias"
+    | "selectProject"
+    | "confirmCreateProject"
+    | "inputProjectName"
+    | "inputPersonName";
+
+  title: string;
+
+  buttons?: QuestionButton[];
+}
+
 export interface CEODecision {
-  decision: 'USE_EXISTING_PROJECT' | 'CREATE_NEW_PROJECT' | 'CREATE_NEW_ENTITY' | 'ASK_USER' | 'UPDATE_REGISTRY';
-  project_id?: string;
-  new_entities?: Entity[];
-  actions?: any[];
+  decision:
+    | "USE_EXISTING_PROJECT"
+    | "CREATE_NEW_PROJECT"
+    | "CREATE_NEW_ENTITY"
+    | "UPDATE_REGISTRY"
+    | "ASK_USER";
+
   message: string;
+
+  question?: CEOQuestion;
+
+  project_id?: string;
+
+  new_entities?: Entity[];
+
+  actions?: any[];
+}
+
+export interface CEOSession {
+  decision: Decision;
+  question?: CEOQuestion;
 }
