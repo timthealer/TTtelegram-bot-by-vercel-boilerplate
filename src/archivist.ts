@@ -2,7 +2,7 @@
 import { analyzeMessage } from './gemini';
 import { runCEORules } from './ceoRules';
 import { Decision, ConversationState, CEODecision } from './types';
-import { getProjects, getPeople, getAgents } from './registry';
+import { getProjects, getPeople, getAgents, addPerson, addProject } from './registry';
 import { createNote } from './notes';
 import { normalizeText } from './alias';
 
@@ -16,20 +16,15 @@ export async function handleMessage(
 
   switch (step) {
     case 'idle': {
-      // Нормализуем текст (алиасы)
       const normalizedText = await normalizeText(text);
       const decision = await analyzeMessage(normalizedText);
-
-      // Загружаем Registry
       const projects = await getProjects();
       const people = await getPeople();
       const agents = await getAgents();
 
-      // Запускаем детерминированные правила CEO
       const ceoDecision: CEODecision = runCEORules(decision, { projects, people, agents });
 
       if (ceoDecision.decision === 'ASK_USER') {
-        // Сохраняем вопрос и контекст
         return {
           type: 'ask',
           message: ceoDecision.message,
@@ -41,7 +36,6 @@ export async function handleMessage(
         };
       }
 
-      // Если решение принято — сохраняем заметку
       let notePath = '';
       for (const action of ceoDecision.actions || []) {
         if (action.type === 'set_project' || action.type === 'create_note') {
@@ -60,7 +54,6 @@ export async function handleMessage(
     }
 
     case 'waiting_ceo_answer': {
-      // Получаем сохранённый контекст
       const savedDecision = data.decision as Decision;
       const savedCEODecision = data.ceoDecision as CEODecision;
       if (!savedDecision) {
@@ -71,33 +64,87 @@ export async function handleMessage(
         };
       }
 
-      // Ответ пользователя — это текст кнопки (например, "project_create")
-      const userAnswer = text;
+      // Обрабатываем ответ пользователя (выбор из кнопок или текстовый ответ)
+      let updatedDecision = savedDecision;
+      let updatedCEODecision = savedCEODecision;
 
-      // Загружаем Registry заново (возможно, уже изменился)
-      const projects = await getProjects();
-      const people = await getPeople();
-      const agents = await getAgents();
+      // Проверяем, является ли ответ выбором из кнопок
+      if (text.startsWith('person_existing_')) {
+        const personId = text.replace('person_existing_', '');
+        const people = await getPeople();
+        const selectedPerson = people.find(p => p.id === personId);
+        if (selectedPerson) {
+          // Добавляем человека в решение
+          updatedCEODecision.actions = updatedCEODecision.actions || [];
+          updatedCEODecision.actions.push({ type: 'link_person', person_id: selectedPerson.id });
+          updatedCEODecision.message = `✅ Использую существующего человека: ${selectedPerson.name}`;
+        }
+      } else if (text === 'person_create') {
+        // TODO: запросить имя нового человека (пока заглушка)
+        // Временно создаём человека с именем "Новый человек"
+        const newPerson = {
+          id: `person-${Date.now()}`,
+          name: 'Новый человек',
+          aliases: [],
+          projects: []
+        };
+        await addPerson(newPerson);
+        updatedCEODecision.actions = updatedCEODecision.actions || [];
+        updatedCEODecision.actions.push({ type: 'link_person', person_id: newPerson.id });
+        updatedCEODecision.message = `✅ Создан новый человек: ${newPerson.name}`;
+      } else if (text.startsWith('project_existing_')) {
+        const projectId = text.replace('project_existing_', '');
+        const projects = await getProjects();
+        const selectedProject = projects.find(p => p.id === projectId);
+        if (selectedProject) {
+          updatedCEODecision.actions = updatedCEODecision.actions || [];
+          updatedCEODecision.actions.push({ type: 'set_project', project: selectedProject.folder || '12_Inbox' });
+          updatedCEODecision.message = `✅ Использую существующий проект: ${selectedProject.name}`;
+        }
+      } else if (text === 'project_create') {
+        // TODO: запросить название нового проекта (пока заглушка)
+        const newProject = {
+          id: `project-${Date.now()}`,
+          name: 'Новый проект',
+          status: 'активен',
+          folder: '12_Inbox',
+          created: new Date().toISOString().slice(0, 10),
+          tags: []
+        };
+        await addProject(newProject);
+        updatedCEODecision.actions = updatedCEODecision.actions || [];
+        updatedCEODecision.actions.push({ type: 'set_project', project: '12_Inbox' });
+        updatedCEODecision.message = `✅ Создан новый проект: ${newProject.name}`;
+      } else if (text === 'cancel') {
+        return {
+          type: 'response',
+          message: '❌ Отменено.',
+          nextState: { step: 'idle', data: {} }
+        };
+      } else {
+        // Если не распознано — просто сохраняем с текущим решением
+        // Можно спросить ещё раз
+        return {
+          type: 'ask',
+          message: '❌ Не понял ответ. Пожалуйста, выберите из предложенных вариантов.',
+          buttons: savedCEODecision.buttons || [],
+          nextState: { step: 'waiting_ceo_answer', data: { decision: savedDecision, ceoDecision: savedCEODecision } }
+        };
+      }
 
-      // В зависимости от ответа пользователя модифицируем решение
-      // Здесь можно реализовать логику обработки конкретных ответов
-      // Например, если пользователь выбрал "project_create" — создаём новый проект
-      // Пока просто передаём ответ в ceoRules для повторного анализа
-      // (можно расширить логику позже)
-
-      // Временно: просто сохраняем заметку с выбранным проектом
+      // Сохраняем заметку с обновлённым решением
       let notePath = '';
-      for (const action of savedCEODecision.actions || []) {
+      for (const action of updatedCEODecision.actions || []) {
         if (action.type === 'set_project' || action.type === 'create_note') {
-          notePath = await createNote(savedDecision, savedCEODecision);
+          notePath = await createNote(updatedDecision, updatedCEODecision);
         }
       }
 
       return {
         type: 'confirm',
-        decision: savedDecision,
-        ceoDecision: savedCEODecision,
-        message: `✅ Заметка сохранена.`,
+        decision: updatedDecision,
+        ceoDecision: updatedCEODecision,
+        message: updatedCEODecision.message,
         notePath,
         nextState: { step: 'idle', data: {} }
       };
