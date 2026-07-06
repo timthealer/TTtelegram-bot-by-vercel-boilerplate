@@ -3,7 +3,7 @@ import { Entity } from './types';
 import { getGitHubFile, putGitHubFile } from './github';
 import * as yaml from 'js-yaml';
 
-function safeParseYaml(content: string): any[] {
+function safeParseYaml(content: string | null): any[] {
   if (!content || content.trim() === '') return [];
   try {
     const blocks = content.split('---').filter(b => b.trim());
