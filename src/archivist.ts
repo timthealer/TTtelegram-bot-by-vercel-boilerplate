@@ -79,7 +79,6 @@ export async function handleMessage(
 
       console.log('[handleMessage] WAITING_CEO_ANSWER: text=', text);
 
-      // --- Обработка ответов ---
       try {
         if (text.startsWith('person_existing_')) {
           const personId = text.replace('person_existing_', '');
@@ -110,6 +109,11 @@ export async function handleMessage(
           updatedCEODecision.message = `✅ Создан новый человек: ${newPerson.name}`;
           noteFolder = updatedCEODecision.actions.find(a => a.type === 'set_project')?.project || '12_Inbox';
           updatedCEODecision.actions.push({ type: 'create_note', folder: noteFolder });
+        } else if (text === 'person_skip') {
+          console.log('[handleMessage] WAITING_CEO_ANSWER: person_skip');
+          noteFolder = updatedCEODecision.actions.find(a => a.type === 'set_project')?.project || '12_Inbox';
+          updatedCEODecision.actions.push({ type: 'create_note', folder: noteFolder });
+          updatedCEODecision.message = `✅ Сохраню без привязки человека.`;
         } else if (text.startsWith('project_existing_')) {
           const projectId = text.replace('project_existing_', '');
           console.log('[handleMessage] WAITING_CEO_ANSWER: project_existing_', projectId);
@@ -141,6 +145,13 @@ export async function handleMessage(
           updatedCEODecision.message = `✅ Создан новый проект: ${newProject.name}`;
           noteFolder = '12_Inbox';
           updatedCEODecision.actions.push({ type: 'create_note', folder: noteFolder });
+        } else if (text === 'project_inbox') {
+          console.log('[handleMessage] WAITING_CEO_ANSWER: project_inbox');
+          noteFolder = '12_Inbox';
+          updatedCEODecision.actions = updatedCEODecision.actions || [];
+          updatedCEODecision.actions.push({ type: 'set_project', project: '12_Inbox' });
+          updatedCEODecision.actions.push({ type: 'create_note', folder: noteFolder });
+          updatedCEODecision.message = `📥 Сохраню в Inbox.`;
         } else if (text === 'cancel') {
           console.log('[handleMessage] WAITING_CEO_ANSWER: cancel');
           return {
