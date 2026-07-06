@@ -1,34 +1,63 @@
 // src/notes.ts
-import { Decision } from './types';
-import { putGitHubFile } from './github';
-import { updateDocumentIndex } from './indexes';
 
-export async function createNote(decision: Decision, ceoDecision: any): Promise<string> {
-  const title = decision.title || 'заметка';
-  const folder = decision.folder || '12_Inbox';
-  const fileName = title.replace(/[^a-zA-Zа-яА-Я0-9\s-]/g, '').trim().replace(/\s+/g, '_') + '.md';
-  const filePath = `${folder}/${fileName}`;
+import { Decision } from "./types";
+import { putGitHubFile } from "./github";
 
-  const now = new Date();
-  const entities = decision.entities?.map(e => `  - ${e.id}`).join('\n') ?? '';
-  const tags = (decision.tags || []).join(', ');
+function sanitize(name: string): string {
+  return name
+    .replace(/[<>:"/\\|?*]/g, "")
+    .replace(/\s+/g, "_")
+    .trim();
+}
 
-  const frontmatter = `---
-title: ${title}
-type: ${decision.type || 'заметка'}
-status: активна
-entities:
+function buildPath(decision: Decision): string {
+  const folder = decision.folder?.trim() || "12_Inbox";
+
+  const fileName =
+    sanitize(decision.title || "Новая заметка") + ".md";
+
+  return `${folder}/${fileName}`;
+}
+
+function buildMarkdown(decision: Decision): string {
+  const entities =
+    (decision.entities || [])
+      .map((e) => `- ${e.type}: ${e.name}`)
+      .join("\n") || "-";
+
+  return `# ${decision.title}
+
+## Тип
+
+${decision.type}
+
+## Описание
+
+${decision.summary}
+
+## Исходное сообщение
+
+${decision.note}
+
+## Сущности
+
 ${entities}
-tags: [${tags}]
-created: ${now.toISOString().slice(0, 10)}
-source: telegram
----
-${decision.note || ''}`;
+`;
+}
 
-  await putGitHubFile(filePath, frontmatter, `Добавлено из Telegram: ${title}`);
+export async function createNote(
+  decision: Decision
+): Promise<string> {
 
-  // Обновляем Document_Index
-  await updateDocumentIndex(filePath, decision);
+  const path = buildPath(decision);
 
-  return filePath;
+  const content = buildMarkdown(decision);
+
+  await putGitHubFile(
+    path,
+    content,
+    `Create note: ${decision.title}`
+  );
+
+  return path;
 }
