@@ -1,10 +1,10 @@
-// src/bot.ts
-
 import { Telegraf, Markup } from "telegraf";
 import { handleMessage } from "./archivist";
 import { ConversationState } from "./types";
 
 const bot = new Telegraf(process.env.BOT_TOKEN!);
+
+const conversations = new Map<number, ConversationState>();
 
 bot.catch((err, ctx) => {
   console.error("===== TELEGRAF ERROR =====");
@@ -12,57 +12,56 @@ bot.catch((err, ctx) => {
   console.error("Context update:", ctx.update);
 });
 
-const conversations = new Map<number, ConversationState>();
-
 function renderResponse(response: any) {
   switch (response.type) {
     case "ask": {
-      let keyboard = undefined;
-
-      if (response.question?.buttons?.length) {
-        keyboard = Markup.inlineKeyboard(
-          response.question.buttons.map((b: any) => [
-            Markup.button.callback(b.text, b.id),
-          ])
-        );
-      }
+      const buttons =
+        response.buttons?.map((b: any) => [
+          Markup.button.callback(b.text, `answer:${b.value}`)
+        ]) || [];
 
       return {
         text: response.message,
         extra: {
           parse_mode: "HTML",
-          reply_markup: keyboard?.reply_markup,
+          reply_markup:
+            buttons.length > 0
+              ? Markup.inlineKeyboard(buttons).reply_markup
+              : undefined
         },
-        nextState: response.nextState,
+        nextState:
+          response.nextState || {
+            step: "waiting_ceo_answer",
+            data: {}
+          }
       };
     }
 
     case "confirm": {
       return {
-        text: `📝 <b>CEO принял решение</b>
+        text: `✅ ${response.message}
 
-${response.message}
-
-<b>Название:</b> ${response.decision.title}
-<b>Папка:</b> ${response.decision.folder || "не определена"}
-<b>Тип:</b> ${response.decision.type}
-
-${response.notePath ? "✅ Заметка сохранена" : ""}`,
+📁 ${response.notePath || ""}`,
         extra: {
-          parse_mode: "HTML",
+          parse_mode: "HTML"
         },
-        nextState: response.nextState,
+        nextState: {
+          step: "idle",
+          data: {}
+        }
       };
     }
 
-    case "response":
+    case "response": {
       return {
         text: response.message,
-        extra: {
-          parse_mode: "HTML",
-        },
-        nextState: response.nextState,
+        extra: {},
+        nextState: {
+          step: "idle",
+          data: {}
+        }
       };
+    }
 
     default:
       return {
@@ -70,8 +69,8 @@ ${response.notePath ? "✅ Заметка сохранена" : ""}`,
         extra: {},
         nextState: {
           step: "idle",
-          data: {},
-        },
+          data: {}
+        }
       };
   }
 }
@@ -83,7 +82,7 @@ bot.on("text", async (ctx) => {
     conversations.get(chatId) || {
       chatId,
       step: "idle",
-      data: {},
+      data: {}
     };
 
   const response = await handleMessage(
@@ -96,20 +95,15 @@ bot.on("text", async (ctx) => {
 
   conversations.set(chatId, {
     chatId,
-    ...(rendered.nextState || {
-      step: "idle",
-      data: {},
-    }),
+    ...rendered.nextState
   });
 
   await ctx.reply(rendered.text, rendered.extra);
 });
 
-bot.on("callback_query", async (ctx) => {
-  if (!("data" in ctx.callbackQuery)) return;
-
-  const chatId = ctx.chat.id;
-  const callback = ctx.callbackQuery.data;
+bot.action(/^answer:(.+)$/, async (ctx) => {
+  const chatId = ctx.chat!.id;
+  const answer = ctx.match[1];
 
   await ctx.answerCbQuery();
 
@@ -117,11 +111,11 @@ bot.on("callback_query", async (ctx) => {
     conversations.get(chatId) || {
       chatId,
       step: "idle",
-      data: {},
+      data: {}
     };
 
   const response = await handleMessage(
-    callback,
+    answer,
     chatId,
     state
   );
@@ -130,13 +124,8 @@ bot.on("callback_query", async (ctx) => {
 
   conversations.set(chatId, {
     chatId,
-    ...(rendered.nextState || {
-      step: "idle",
-      data: {},
-    }),
+    ...rendered.nextState
   });
-
-  await ctx.editMessageReplyMarkup(undefined).catch(() => {});
 
   await ctx.reply(rendered.text, rendered.extra);
 });
