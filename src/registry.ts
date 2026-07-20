@@ -1,77 +1,120 @@
 // src/registry.ts
-import { Entity } from './types';
+
 import { getGitHubFile, putGitHubFile } from './github';
 import * as yaml from 'js-yaml';
 
-/**
- * Безопасный парсер YAML-блоков из файла Registry
- * Возвращает всегда массив, даже если файл пуст или повреждён
- */
-function safeParseYaml(content: string | null): any[] {
-  if (!content || content.trim() === '') return [];
+function safeParseYaml(content: string): any[] {
+  if (!content) return [];
 
-  try {
-    const blocks = content.split('---').filter(b => b.trim());
+  const result: any[] = [];
 
-    return blocks
-      .map(block => {
-        try {
-          // Проверяем, есть ли в блоке хотя бы одно поле (ключ: значение)
-          // Если блок содержит только комментарии или пуст — пропускаем
-          if (!block.includes(':') && !block.includes('id:')) {
-            return null;
-          }
-          return yaml.load(block) as any;
-        } catch (e) {
-          // Ошибка парсинга одного блока — игнорируем
-          return null;
-        }
-      })
-      .filter(item => item !== null); // убираем null
-  } catch (e) {
-    console.warn('Ошибка парсинга Registry:', e);
-    return [];
+  const blocks = content
+    .split('---')
+    .map(b => b.trim())
+    .filter(b => b.length > 0);
+
+  for (const block of blocks) {
+    try {
+      const obj = yaml.load(block);
+
+      if (obj && typeof obj === 'object') {
+        result.push(obj);
+      }
+
+    } catch (err) {
+      console.warn('YAML block skipped:', err);
+    }
   }
+
+  return result;
 }
 
 export async function readRegistryFile(fileName: string): Promise<any[]> {
-  const content = await getGitHubFile(`Registry/${fileName}`);
-  return safeParseYaml(content);
+  try {
+    const content = await getGitHubFile(`Registry/${fileName}`);
+
+    if (!content) {
+      return [];
+    }
+
+    return safeParseYaml(content);
+
+  } catch (err) {
+    console.warn(`Registry/${fileName} not found`);
+    return [];
+  }
 }
 
 export async function writeRegistryFile(
   fileName: string,
   entries: any[],
-  commitMsg: string
-) {
-  if (!entries || entries.length === 0) {
-    await putGitHubFile(`Registry/${fileName}`, '# Пустой реестр\n', commitMsg);
-    return;
+  commitMessage: string
+): Promise<void> {
+
+  let content = '';
+
+  for (const entry of entries) {
+    content +=
+`---
+${yaml.dump(entry)}
+`;
   }
-  const content = entries.map(e => `---\n${yaml.dump(e)}---`).join('\n');
-  await putGitHubFile(`Registry/${fileName}`, content, commitMsg);
+
+  if (content.trim() === '') {
+    content = '# empty';
+  }
+
+  await putGitHubFile(
+    `Registry/${fileName}`,
+    content,
+    commitMessage
+  );
 }
 
-export async function getProjects(): Promise<any[]> {
+export async function getProjects() {
   return await readRegistryFile('Projects.md');
 }
 
-export async function getAgents(): Promise<any[]> {
-  return await readRegistryFile('Agents.md');
+export async function getPeople() {
+  return await readRegistryFile('People.md');
 }
 
-export async function getPeople(): Promise<any[]> {
-  return await readRegistryFile('People.md');
+export async function getAgents() {
+  return await readRegistryFile('Agents.md');
 }
 
 export async function addProject(project: any) {
   const projects = await getProjects();
+
   projects.push(project);
-  await writeRegistryFile('Projects.md', projects, `Add project: ${project.name}`);
+
+  await writeRegistryFile(
+    'Projects.md',
+    projects,
+    `Add project: ${project.name}`
+  );
 }
 
 export async function addPerson(person: any) {
   const people = await getPeople();
+
   people.push(person);
-  await writeRegistryFile('People.md', people, `Add person: ${person.name}`);
+
+  await writeRegistryFile(
+    'People.md',
+    people,
+    `Add person: ${person.name}`
+  );
+}
+
+export async function addAgent(agent: any) {
+  const agents = await getAgents();
+
+  agents.push(agent);
+
+  await writeRegistryFile(
+    'Agents.md',
+    agents,
+    `Add agent: ${agent.name}`
+  );
 }
