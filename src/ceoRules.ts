@@ -45,14 +45,22 @@ function getPersonProjects(person: any, allProjects: any[]): any[] {
 export function runCEORules(
   decision: Decision,
   registry: { projects: any[]; people: any[]; agents: any[] }
+export function runCEORules(
+  decision: Decision,
+  registry: { projects?: any[]; people?: any[]; agents?: any[] }
 ): CEODecision {
-  const { projects, people } = registry;
 
-  const projectEntity = decision.entities.find(e => e.type === 'project');
-  const personEntity = decision.entities.find(e => e.type === 'person');
+  const projects = Array.isArray(registry.projects)
+    ? registry.projects
+    : [];
 
-  let projectName = projectEntity?.name || '';
-  let personName = personEntity?.name || '';
+  const people = Array.isArray(registry.people)
+    ? registry.people
+    : [];
+
+  const agents = Array.isArray(registry.agents)
+    ? registry.agents
+    : [];
 
   // --- Поиск проекта ---
   let projectResult = projectName ? findMatchingProject(projectName, projects) : null;
