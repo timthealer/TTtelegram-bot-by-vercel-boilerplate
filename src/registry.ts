@@ -6,23 +6,27 @@ import * as yaml from 'js-yaml';
 function safeParseYaml(content: string): any[] {
   if (!content) return [];
 
+  const docs = content
+    .split(/^---$/gm)
+    .map(doc => doc.trim())
+    .filter(doc => doc.length > 0);
+
   const result: any[] = [];
 
-  const blocks = content
-    .split('---')
-    .map(b => b.trim())
-    .filter(b => b.length > 0);
-
-  for (const block of blocks) {
+  for (const doc of docs) {
     try {
-      const obj = yaml.load(block);
+      const parsed = yaml.load(doc);
 
-      if (obj && typeof obj === 'object') {
-        result.push(obj);
+      if (
+        parsed &&
+        typeof parsed === 'object' &&
+        !(parsed as any).type && // пропускаем Entities.md
+        !(parsed as any).description?.startsWith?.('Список')
+      ) {
+        result.push(parsed);
       }
-
-    } catch (err) {
-      console.warn('YAML block skipped:', err);
+    } catch {
+      // молча пропускаем служебные блоки
     }
   }
 
@@ -33,13 +37,11 @@ export async function readRegistryFile(fileName: string): Promise<any[]> {
   try {
     const content = await getGitHubFile(`Registry/${fileName}`);
 
-    if (!content) {
-      return [];
-    }
+    if (!content) return [];
 
     return safeParseYaml(content);
 
-  } catch (err) {
+  } catch (e) {
     console.warn(`Registry/${fileName} not found`);
     return [];
   }
@@ -51,18 +53,9 @@ export async function writeRegistryFile(
   commitMessage: string
 ): Promise<void> {
 
-  let content = '';
-
-  for (const entry of entries) {
-    content +=
-`---
-${yaml.dump(entry)}
-`;
-  }
-
-  if (content.trim() === '') {
-    content = '# empty';
-  }
+  const content = entries
+    .map(entry => `---\n${yaml.dump(entry)}`)
+    .join('\n');
 
   await putGitHubFile(
     `Registry/${fileName}`,
@@ -72,49 +65,43 @@ ${yaml.dump(entry)}
 }
 
 export async function getProjects() {
-  return await readRegistryFile('Projects.md');
+  return readRegistryFile('Projects.md');
 }
 
 export async function getPeople() {
-  return await readRegistryFile('People.md');
+  return readRegistryFile('People.md');
 }
 
 export async function getAgents() {
-  return await readRegistryFile('Agents.md');
+  return readRegistryFile('Agents.md');
 }
 
 export async function addProject(project: any) {
-  const projects = await getProjects();
-
-  projects.push(project);
-
+  const list = await getProjects();
+  list.push(project);
   await writeRegistryFile(
     'Projects.md',
-    projects,
+    list,
     `Add project: ${project.name}`
   );
 }
 
 export async function addPerson(person: any) {
-  const people = await getPeople();
-
-  people.push(person);
-
+  const list = await getPeople();
+  list.push(person);
   await writeRegistryFile(
     'People.md',
-    people,
+    list,
     `Add person: ${person.name}`
   );
 }
 
 export async function addAgent(agent: any) {
-  const agents = await getAgents();
-
-  agents.push(agent);
-
+  const list = await getAgents();
+  list.push(agent);
   await writeRegistryFile(
     'Agents.md',
-    agents,
+    list,
     `Add agent: ${agent.name}`
   );
 }
