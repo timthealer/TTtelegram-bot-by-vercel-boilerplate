@@ -68,6 +68,8 @@ export interface CEODecision {
   new_entities?: Entity[];
 
   actions?: any[];
+
+  buttons?: any[];
 }
 
 export interface CEOSession {

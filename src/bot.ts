@@ -28,7 +28,7 @@ bot.catch((err, ctx) => {
   console.error("Context update:", ctx.update);
 });
 
-function renderResponse(response: any) {
+function renderResponse(response: any): any {
   switch (response.type) {
     case "ask": {
       const buttons =

@@ -111,6 +111,7 @@ export async function handleMessage(
           updatedCEODecision.actions.push({ type: 'create_note', folder: noteFolder });
         } else if (text === 'person_skip') {
           console.log('[handleMessage] WAITING_CEO_ANSWER: person_skip');
+          updatedCEODecision.actions = updatedCEODecision.actions || [];
           noteFolder = updatedCEODecision.actions.find(a => a.type === 'set_project')?.project || '12_Inbox';
           updatedCEODecision.actions.push({ type: 'create_note', folder: noteFolder });
           updatedCEODecision.message = `✅ Сохраню без привязки человека.`;
@@ -172,7 +173,7 @@ export async function handleMessage(
         console.error('[handleMessage] WAITING_CEO_ANSWER: error processing answer', error);
         return {
           type: 'error',
-          message: `❌ Ошибка: ${error.message || error}`,
+          message: `❌ Ошибка: ${(error instanceof Error ? error.message : String(error))}`,
           nextState: { step: 'idle', data: {} }
         };
       }
@@ -193,7 +194,7 @@ export async function handleMessage(
         console.error('[handleMessage] WAITING_CEO_ANSWER: error creating note', error);
         return {
           type: 'error',
-          message: `❌ Ошибка создания заметки: ${error.message || error}`,
+          message: `❌ Ошибка создания заметки: ${(error instanceof Error ? error.message : String(error))}`,
           nextState: { step: 'idle', data: {} }
         };
       }
