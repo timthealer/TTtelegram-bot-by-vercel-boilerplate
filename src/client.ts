@@ -90,6 +90,57 @@ const FOLLOWUP_QUESTIONS: Question[] = [
 
 const MAX_TOTAL = 18;
 
+// --- transliteration / slug for company-named folders ---
+const TRANSLIT: Record<string, string> = {
+  а: "a", б: "b", в: "v", г: "g", д: "d", е: "e", ё: "e", ж: "zh", з: "z",
+  и: "i", й: "y", к: "k", л: "l", м: "m", н: "n", о: "o", п: "p", р: "r",
+  с: "s", т: "t", у: "u", ф: "f", х: "h", ц: "c", ч: "ch", ш: "sh", щ: "sch",
+  ъ: "", ы: "y", ь: "", э: "e", ю: "yu", я: "ya",
+  А: "a", Б: "b", В: "v", Г: "g", Д: "d", Е: "e", Ё: "e", Ж: "zh", З: "z",
+  И: "i", Й: "y", К: "k", Л: "l", М: "m", Н: "n", О: "o", П: "p", Р: "r",
+  С: "s", Т: "t", У: "u", Ф: "f", Х: "h", Ц: "c", Ч: "ch", Ш: "sh", Щ: "sch",
+  Ъ: "", Ы: "y", Ь: "", Э: "e", Ю: "yu", Я: "ya",
+};
+
+function slugifyCompany(company: string): string {
+  let s = company.replace(
+    /\b(ООО|ОАО|ЗАО|АО|ИП|ТОО|PJSC|LLC|LTD|INC)\b/g,
+    " "
+  );
+  s = s.replace(/«|»|"|'/g, " ");
+  s = s
+    .split("")
+    .map((c) => TRANSLIT[c] ?? c)
+    .join("");
+  s = s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return s || "";
+}
+
+function parseIntro(text: string): { name: string; company: string } {
+  const parts = text.split(",").map((p) => p.trim()).filter(Boolean);
+  const companyRe = /\b(ООО|ОАО|ЗАО|АО|ИП|ТОО|PJSC|LLC|LTD|INC)\b/i;
+  const isCompany = (p: string) => companyRe.test(p) || /[«»]/.test(p);
+  const isPerson = (p: string) =>
+    /^[А-ЯЁA-Z]/.test(p) && p.split(/\s+/).length <= 3 && !isCompany(p);
+
+  let company = parts.find(isCompany) || "";
+  let name = parts.find(isPerson) || "";
+  if (!company && parts.length === 1 && !name) company = parts[0];
+  if (!name && parts.length >= 2) {
+    const other = parts.find((p) => !isCompany(p));
+    if (other && /^[А-ЯЁA-Z]/.test(other)) name = other;
+  }
+  return { name, company };
+}
+
+function firstNameOf(name: string): string {
+  const w = (name || "").trim().split(/\s+/)[0];
+  return w || "Клиент";
+}
+
 export function createClientBot(): Telegraf {
   const token = process.env.CLIENT_BOT_TOKEN;
   if (!token) throw new Error("CLIENT_BOT_TOKEN is not set");
@@ -121,6 +172,13 @@ export function createClientBot(): Telegraf {
   async function findClient(chatId: number) {
     const clients = await getRegistry();
     return clients.find((c: any) => c.chat_id === chatId) || null;
+  }
+  async function upsertClient(updated: any) {
+    const clients = await getRegistry();
+    const i = clients.findIndex((c: any) => c.chat_id === updated.chat_id);
+    if (i >= 0) clients[i] = { ...clients[i], ...updated };
+    else clients.push(updated);
+    await saveRegistry(clients);
   }
 
   // --- interview ---
@@ -186,60 +244,121 @@ export function createClientBot(): Telegraf {
 
   async function askNext(client: any, ctx: any) {
     const slot = await nextSlot(client);
+    const fn = firstNameOf(client.first_name || client.name);
     if (!slot) {
       await ctx.reply(
-        "✅ Спасибо! Информация собрана. Мы подготовим аудит и предложения по автоматизации и свяжемся с вами."
+        `✅ Спасибо, ${fn}! Информация собрана. Мы подготовим аудит и предложения по автоматизации и свяжемся с вами.`
       );
       return;
     }
     const q = slot.type === "Q" ? BASE_QUESTIONS[slot.idx - 1] : FOLLOWUP_QUESTIONS[slot.idx - 1];
     const header =
       slot.type === "Q"
-        ? `Вопрос ${slot.idx} из ${BASE_QUESTIONS.length}:`
-        : `Уточняющий вопрос ${slot.idx}:`;
+        ? `${fn}, вопрос ${slot.idx} из ${BASE_QUESTIONS.length}:`
+        : `${fn}, уточняющий вопрос ${slot.idx}:`;
     await ctx.reply(`${header}\n${q.text}`, buildKeyboard(q, slot.type, slot.idx));
+  }
+
+  // --- introduction / onboarding ---
+  async function saveProfile(client: any) {
+    const existing = (await getGitHubFile(`clients/${client.slug}/profile.md`)) || "";
+    if (existing) return;
+    await putGitHubFile(
+      `clients/${client.slug}/profile.md`,
+      `# Клиент\n\n- **Имя:** ${client.name || "—"}\n- **Компания:** ${client.company || "—"}\n- **chat_id:** ${client.chat_id}\n- **создан:** ${client.created}\n`,
+      `clients/${client.slug}: profile`
+    );
+  }
+
+  async function startOnboarding(ctx: any, chatId: number) {
+    await ctx.reply(
+      "Здравствуйте! Давайте познакомимся.\n\nНапишите, пожалуйста, ваше имя и название компании, например: «Иван Петров, ООО Акваким»"
+    );
+  }
+
+  async function finishIntro(ctx: any, chatId: number, text: string) {
+    const { name, company } = parseIntro(text);
+    const first_name = firstNameOf(name);
+
+    if (!name && !company) {
+      await ctx.reply(
+        "Не совсем понял. Напишите, пожалуйста, имя и название компании, например: «Иван Петров, ООО Акваким»"
+      );
+      return;
+    }
+
+    if (!company) {
+      await upsertClient({
+        chat_id: chatId,
+        slug: `client-${chatId}`,
+        name,
+        first_name,
+        company: "",
+        status: "need_company",
+        created: new Date().toISOString().slice(0, 10),
+      });
+      await ctx.reply(
+        `${first_name}, приятно познакомиться! Как называется ваша компания?`
+      );
+      return;
+    }
+
+    const slug = slugifyCompany(company) || `client-${chatId}`;
+    const client = {
+      chat_id: chatId,
+      slug,
+      name: name || company,
+      first_name,
+      company,
+      status: "interview",
+      created: new Date().toISOString().slice(0, 10),
+    };
+    await upsertClient(client);
+    await saveProfile(client);
+    await ctx.reply(
+      `${first_name}, рад знакомству! Собрали: компания «${company}». Сбор информации займёт несколько минут. Отвечайте кнопками, текстом или голосовым сообщением.`
+    );
+    await askNext(client, ctx);
   }
 
   // --- handlers ---
   clientBot.command("start", async (ctx) => {
-    const client = await findClient(ctx.chat.id);
-    if (client) {
-      await ctx.reply(`Здравствуйте, ${client.name}! Продолжим сбор информации.`);
+    const chatId = ctx.chat.id;
+    const client = await findClient(chatId);
+    if (client && client.status === "interview" && (client.first_name || client.name)) {
+      const fn = firstNameOf(client.first_name || client.name);
+      await ctx.reply(`Здравствуйте, ${fn}! Продолжим сбор информации.`);
       await askNext(client, ctx);
+    } else if (client && client.status === "need_company") {
+      const fn = firstNameOf(client.first_name || client.name);
+      await ctx.reply(`${fn}, приятно познакомиться! Как называется ваша компания?`);
     } else {
-      await ctx.reply(
-        "Здравствуйте! Для начала напишите название компании и ваше имя, например: «ООО Акваким, Иван Петров»"
-      );
+      await startOnboarding(ctx, chatId);
     }
   });
 
   clientBot.on("text", async (ctx) => {
     const chatId = ctx.chat.id;
     const client = await findClient(chatId);
+    const text = ctx.message.text.trim();
+    if (!text) return;
+
     if (!client) {
-      const text = ctx.message.text.trim();
-      if (!text) return;
-      const slug = `client-${chatId}`;
-      const newClient = {
-        chat_id: chatId,
-        slug,
-        name: text,
-        company: text,
-        status: "interview",
-        created: new Date().toISOString().slice(0, 10),
-      };
-      const clients = await getRegistry();
-      clients.push(newClient);
-      await saveRegistry(clients);
-      await putGitHubFile(
-        `clients/${slug}/profile.md`,
-        `# Клиент\n\n- **Название:** ${text}\n- **chat_id:** ${chatId}\n- **создан:** ${newClient.created}\n`,
-        `clients/${slug}: profile`
-      );
+      await finishIntro(ctx, chatId, text);
+      return;
+    }
+
+    if (client.status === "need_company") {
+      const company = text;
+      const slug = slugifyCompany(company) || `client-${chatId}`;
+      const updated = { ...client, company, slug, status: "interview" as string };
+      await upsertClient(updated);
+      await saveProfile(updated);
+      const fn = firstNameOf(updated.first_name || updated.name);
       await ctx.reply(
-        `Здравствуйте, «${text}»! Сбор информации займёт несколько минут. Отвечайте на вопросы, можно кнопками, текстом или голосовым сообщением.`
+        `Отлично, ${fn}! Компания «${company}». Начнём сбор информации.`
       );
-      await askNext(newClient, ctx);
+      await askNext(updated, ctx);
       return;
     }
 
@@ -248,15 +367,15 @@ export function createClientBot(): Telegraf {
       await ctx.reply("Вопросы закончены. Спасибо!");
       return;
     }
-    await recordAnswer(client, slot.type, slot.idx, ctx.message.text);
+    await recordAnswer(client, slot.type, slot.idx, text);
     await ctx.reply("Принято.");
     await askNext(client, ctx);
   });
 
   clientBot.on("voice", async (ctx) => {
     const client = await findClient(ctx.chat.id);
-    if (!client) {
-      await ctx.reply("Здравствуйте! Для начала напишите название компании и ваше имя.");
+    if (!client || client.status !== "interview") {
+      await ctx.reply("Здравствуйте! Для начала представьтесь: имя и название компании.");
       return;
     }
     try {
@@ -284,8 +403,8 @@ export function createClientBot(): Telegraf {
     await ctx.answerCbQuery();
     const [, type, idxStr, action] = ctx.match;
     const client = await findClient(ctx.from.id);
-    if (!client) {
-      await ctx.reply("Пожалуйста, начните с /start");
+    if (!client || client.status !== "interview") {
+      await ctx.reply("Пожалуйста, начните с /start и представьтесь.");
       return;
     }
     const idx = parseInt(idxStr, 10);
@@ -309,7 +428,8 @@ export function createClientBot(): Telegraf {
         ? "Не знаю"
         : q.options[parseInt(action.slice(1), 10)];
     await recordAnswer(client, type, idx, label);
-    await ctx.reply(`Принято: ${label}`);
+    const fn = firstNameOf(client.first_name || client.name);
+    await ctx.reply(`Принято, ${fn}: ${label}`);
     await askNext(client, ctx);
   });
 
