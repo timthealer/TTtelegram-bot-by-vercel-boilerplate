@@ -60,4 +60,27 @@ bot.on("document", async (ctx) => {
   }
 });
 
+// Кнопки (вопросы от HuckleberryFinn): формат callback_data "opt:<label>".
+// Ответ владельца логируется в inbox как "Ответ кнопкой: <label>".
+bot.action(/^opt:(.+)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  if (!ctx.chat) return;
+  const label = ctx.match[1];
+  const from = ctx.from;
+  try {
+    const path = await funnelToInbox({
+      text: `Ответ кнопкой: ${label}`,
+      chatId: ctx.chat.id,
+      fromId: from?.id,
+      fromName: from?.username,
+    });
+    await ctx.reply(`Принято: ${label}`);
+  } catch (err) {
+    console.error("Button answer error", err);
+    await ctx.reply(
+      `Ошибка записи: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+});
+
 export default bot;
