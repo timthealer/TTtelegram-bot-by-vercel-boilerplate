@@ -2,7 +2,7 @@ import axios from 'axios';
 
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN!;
 const GITHUB_OWNER = 'timthealer';
-const GITHUB_REPO = 'TOS';
+const GITHUB_REPO = 'TT3Dato';
 const BRANCH = 'master';
 
 export async function getGitHubFile(path: string): Promise<string | null> {
