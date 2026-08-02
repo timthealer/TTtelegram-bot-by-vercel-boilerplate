@@ -1,6 +1,8 @@
 // src/bot.ts
 import { Telegraf } from "telegraf";
+import axios from "axios";
 import { funnelToInbox } from "./funnel";
+import { putGitHubBuffer } from "./github";
 
 const OWNER_CHAT_ID = (process.env.OWNER_CHAT_ID ?? "")
   .split(",")
@@ -34,6 +36,26 @@ bot.on("text", async (ctx) => {
     console.error("Funnel error", err);
     await ctx.reply(
       `Ошибка записи: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+});
+
+bot.on("document", async (ctx) => {
+  const doc = ctx.message.document;
+  if (!doc) return;
+  try {
+    const file = await ctx.telegram.getFile(doc.file_id);
+    if (!file.file_path) throw new Error("file_path is missing");
+    const url = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${file.file_path}`;
+    const res = await axios.get(url, { responseType: "arraybuffer" });
+    const buf = Buffer.from(res.data as any);
+    const name = doc.file_name || `file-${Date.now()}`;
+    await putGitHubBuffer(`Don'tReadMe/${name}`, buf, `Telegram: upload ${name}`);
+    await ctx.reply(`Сохранено в Don'tReadMe/${name}`);
+  } catch (err) {
+    console.error("Upload error", err);
+    await ctx.reply(
+      `Ошибка загрузки: ${err instanceof Error ? err.message : String(err)}`
     );
   }
 });

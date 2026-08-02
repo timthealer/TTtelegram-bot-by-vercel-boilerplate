@@ -4,12 +4,20 @@
     {
       "src": "api/webhook.ts",
       "use": "@vercel/node"
+    },
+    {
+      "src": "api/client.ts",
+      "use": "@vercel/node"
     }
   ],
   "routes": [
     {
       "src": "/api/webhook",
       "dest": "api/webhook.ts"
+    },
+    {
+      "src": "/api/client",
+      "dest": "api/client.ts"
     }
   ]
 }

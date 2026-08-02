@@ -19,8 +19,12 @@ export async function getGitHubFile(path: string): Promise<string | null> {
 }
 
 export async function putGitHubFile(path: string, content: string, commitMsg: string) {
+  await putGitHubBuffer(path, Buffer.from(content, 'utf-8'), commitMsg);
+}
+
+export async function putGitHubBuffer(path: string, content: Buffer, commitMsg: string) {
   const url = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${path}`;
-  const encoded = Buffer.from(content, 'utf-8').toString('base64');
+  const encoded = content.toString('base64');
   let sha: string | undefined;
   try {
     const existing = await axios.get(url, {
