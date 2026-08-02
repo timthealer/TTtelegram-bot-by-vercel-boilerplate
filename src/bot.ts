@@ -4,7 +4,23 @@ import { ConversationState } from "./types";
 
 const bot = new Telegraf(process.env.BOT_TOKEN!);
 
+const OWNER_CHAT_ID = (process.env.OWNER_CHAT_ID ?? "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
 const conversations = new Map<number, ConversationState>();
+
+bot.use((ctx, next) => {
+  const userId = String(ctx.from?.id ?? "");
+  if (OWNER_CHAT_ID.length === 0) {
+    return ctx.reply("Бот заблокирован: не задан OWNER_CHAT_ID.");
+  }
+  if (!OWNER_CHAT_ID.includes(userId)) {
+    return ctx.reply("Доступ только для владельца.");
+  }
+  return next();
+});
 
 bot.catch((err, ctx) => {
   console.error("===== TELEGRAF ERROR =====");
