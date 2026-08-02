@@ -44,9 +44,6 @@ function getPersonProjects(person: any, allProjects: any[]): any[] {
 
 export function runCEORules(
   decision: Decision,
-  registry: { projects: any[]; people: any[]; agents: any[] }
-export function runCEORules(
-  decision: Decision,
   registry: { projects?: any[]; people?: any[]; agents?: any[] }
 ): CEODecision {
 
@@ -61,6 +58,14 @@ export function runCEORules(
   const agents = Array.isArray(registry.agents)
     ? registry.agents
     : [];
+
+  // --- Извлечение сущностей из решения (Gemini/парсер возвращает entities[]) ---
+  const projectEntity =
+    decision.entities?.find((e: any) => e.type === 'project') || null;
+  const personEntity =
+    decision.entities?.find((e: any) => e.type === 'person') || null;
+  const projectName = projectEntity?.name || '';
+  const personName = personEntity?.name || '';
 
   // --- Поиск проекта ---
   let projectResult = projectName ? findMatchingProject(projectName, projects) : null;
