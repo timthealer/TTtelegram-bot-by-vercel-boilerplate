@@ -218,8 +218,10 @@ export function createClientBot(): Telegraf {
     type: string,
     idx: number,
     answer: string
-  ) {
+  ): Promise<boolean> {
     const q = type === "Q" ? BASE_QUESTIONS[idx - 1] : FOLLOWUP_QUESTIONS[idx - 1];
+    const lines = await interviewLines(client.slug);
+    if (lines.some((l) => l.startsWith(`**${type}${idx}:`))) return false;
     const existing = (await getGitHubFile(`clients/${client.slug}/interview.md`)) || "";
     const block = `**${type}${idx}: ${q.text}**\nОтвет: ${answer}\n\n`;
     await putGitHubFile(
@@ -227,6 +229,7 @@ export function createClientBot(): Telegraf {
       `${existing}${block}`,
       `clients/${client.slug}: ${type}${idx} answer`
     );
+    return true;
   }
 
   async function nextSlot(client: any): Promise<{ type: string; idx: number } | null> {
@@ -243,20 +246,27 @@ export function createClientBot(): Telegraf {
   }
 
   async function askNext(client: any, ctx: any) {
-    const slot = await nextSlot(client);
-    const fn = firstNameOf(client.first_name || client.name);
-    if (!slot) {
+    try {
+      const slot = await nextSlot(client);
+      const fn = firstNameOf(client.first_name || client.name);
+      if (!slot) {
+        await ctx.reply(
+          `✅ Спасибо, ${fn}! Информация собрана. Мы подготовим аудит и предложения по автоматизации и свяжемся с вами.`
+        );
+        return;
+      }
+      const q = slot.type === "Q" ? BASE_QUESTIONS[slot.idx - 1] : FOLLOWUP_QUESTIONS[slot.idx - 1];
+      const header =
+        slot.type === "Q"
+          ? `${fn}, вопрос ${slot.idx} из ${BASE_QUESTIONS.length}:`
+          : `${fn}, уточняющий вопрос ${slot.idx}:`;
+      await ctx.reply(`${header}\n${q.text}`, buildKeyboard(q, slot.type, slot.idx));
+    } catch (err) {
+      console.error("askNext error", err);
       await ctx.reply(
-        `✅ Спасибо, ${fn}! Информация собрана. Мы подготовим аудит и предложения по автоматизации и свяжемся с вами.`
+        "Не получилось загрузить следующий вопрос. Попробуйте ещё раз, пожалуйста."
       );
-      return;
     }
-    const q = slot.type === "Q" ? BASE_QUESTIONS[slot.idx - 1] : FOLLOWUP_QUESTIONS[slot.idx - 1];
-    const header =
-      slot.type === "Q"
-        ? `${fn}, вопрос ${slot.idx} из ${BASE_QUESTIONS.length}:`
-        : `${fn}, уточняющий вопрос ${slot.idx}:`;
-    await ctx.reply(`${header}\n${q.text}`, buildKeyboard(q, slot.type, slot.idx));
   }
 
   // --- introduction / onboarding ---
@@ -367,9 +377,16 @@ export function createClientBot(): Telegraf {
       await ctx.reply("Вопросы закончены. Спасибо!");
       return;
     }
-    await recordAnswer(client, slot.type, slot.idx, text);
-    await ctx.reply("Принято.");
-    await askNext(client, ctx);
+    try {
+      await recordAnswer(client, slot.type, slot.idx, text);
+      await ctx.reply("Принято.");
+      await askNext(client, ctx);
+    } catch (err) {
+      console.error("Text answer error", err);
+      await ctx.reply(
+        "Не получилось сохранить ответ. Попробуйте ещё раз, пожалуйста."
+      );
+    }
   });
 
   clientBot.on("voice", async (ctx) => {
@@ -427,10 +444,21 @@ export function createClientBot(): Telegraf {
         : action === "dunno"
         ? "Не знаю"
         : q.options[parseInt(action.slice(1), 10)];
-    await recordAnswer(client, type, idx, label);
     const fn = firstNameOf(client.first_name || client.name);
-    await ctx.reply(`Принято, ${fn}: ${label}`);
-    await askNext(client, ctx);
+    try {
+      const recorded = await recordAnswer(client, type, idx, label);
+      if (!recorded) {
+        await ctx.reply(`Этот вопрос уже учтён, ${fn}.`);
+      } else {
+        await ctx.reply(`Принято, ${fn}: ${label}`);
+      }
+      await askNext(client, ctx);
+    } catch (err) {
+      console.error("Button answer error", err);
+      await ctx.reply(
+        `Не получилось сохранить ответ, ${fn}. Попробуйте ещё раз, пожалуйста.`
+      );
+    }
   });
 
   return clientBot;
